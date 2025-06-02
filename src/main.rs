@@ -1,4 +1,7 @@
-use axum::{Router, routing::{get, post}};
+use axum::{
+    Router,
+    routing::{get, post},
+};
 use axum_server::bind;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -7,7 +10,9 @@ use std::net::SocketAddr;
 use tracing_subscriber;
 
 mod routes;
+use routes::auth::auth_routes;
 use routes::auth::register;
+
 
 #[tokio::main]
 async fn main() {
@@ -23,11 +28,12 @@ async fn main() {
         .connect(&database_url)
         .await
         .expect("Failed to create pool");
+    println!("Database connection pool created successfully");
 
     let app = Router::new()
-        .route("/", get(root))
-        .route("/users/register", post(register))
-        .with_state(pool); // Add the pool to the app state
+        .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
+        .route("/", get(root));
+     
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
     let addr = SocketAddr::from(([127, 0, 0, 1], port.parse::<u16>().unwrap()));
