@@ -1,10 +1,11 @@
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core::OsRng},
+    PasswordVerifier,
 };
 use axum::{
     Router,
-    extract::{Json, State},
+    extract::{Json, State, Extension},
     routing::post,
     response::IntoResponse,
     http::StatusCode,
@@ -12,9 +13,9 @@ use axum::{
 use serde::Deserialize;
 use sqlx::{PgPool, query};
 use validator::Validate;
+use crate::utils::jwt::create_jwt;
 
-pub mod helpers;
-use helpers::jwt::create_jwt;
+
 
 
 #[derive(Deserialize, Validate)]
@@ -31,7 +32,9 @@ pub struct RegisterInput {
 }
 
 pub fn auth_routes(pool:PgPool) -> Router {
-    Router::new().route("/register", post(register)).with_state(pool)
+    Router::new().route("/register", post(register))
+    .route("/login", post(login_handler))
+    .with_state(pool)
     // You can add more routes here in the future
 }
 
@@ -40,6 +43,8 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterIn
     if payload.password != payload.confirm_password {
         return "❌ Passwords do not match".to_string();
     }
+
+
 
     //check if the user already exists
     let existing_user = sqlx::query_scalar!(
@@ -76,17 +81,17 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterIn
 
     match result {
         Ok(_) => "✅ User registered successfully".to_string(),
-        Err(e) => "❌ Error registering user: ".to_string(),
+        Err(_) => "❌ Error registering user: ".to_string(),
     }
 }
 
-
+#[derive(Deserialize)]
 pub struct LoginRequest{
     pub email: String,
     pub password: String,
 }
 
-pub async fn login_handler(Json(payload): Json<LoginRequest>, db: axum::extract::Extension<PgPool>,)
+pub async fn login_handler(Extension(db):Extension<PgPool>,Json(payload): Json<LoginRequest>, )
  -> impl IntoResponse{
     let user = sqlx::query!(
         "SELECT id, username, password FROM users WHERE email = $1",
@@ -96,7 +101,7 @@ pub async fn login_handler(Json(payload): Json<LoginRequest>, db: axum::extract:
     if let Some(user) = user {
         let parsed_hash = PasswordHash::new(&user.password).unwrap();
 
-        if Argon2::default().verify_password(payload.password.as_bytes(), parsed_hash).is_ok(){
+        if Argon2::default().verify_password(payload.password.as_bytes(), &parsed_hash).is_ok(){
             let token  = create_jwt(&user.id.to_string());
             return (StatusCode::OK, Json(serde_json::json!({
                 "message": "Login successful",
@@ -106,4 +111,8 @@ pub async fn login_handler(Json(payload): Json<LoginRequest>, db: axum::extract:
             })));
         }
     }
+
+     (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
+        "message": "Invalid email or password"
+    })))
  }

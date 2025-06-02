@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get,},
 };
 use axum_server::bind;
 use dotenvy::dotenv;
@@ -9,9 +9,10 @@ use std::env;
 use std::net::SocketAddr;
 use tracing_subscriber;
 
+mod utils;
 mod routes;
 use routes::auth::auth_routes;
-use routes::auth::register;
+
 
 
 #[tokio::main]
