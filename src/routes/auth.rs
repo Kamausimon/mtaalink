@@ -6,10 +6,15 @@ use axum::{
     Router,
     extract::{Json, State},
     routing::post,
+    response::IntoResponse,
+    http::StatusCode,
 };
 use serde::Deserialize;
 use sqlx::{PgPool, query};
 use validator::Validate;
+
+pub mod helpers;
+use helpers::jwt::create_jwt;
 
 
 #[derive(Deserialize, Validate)]
@@ -74,3 +79,31 @@ pub async fn register(State(pool): State<PgPool>, Json(payload): Json<RegisterIn
         Err(e) => "❌ Error registering user: ".to_string(),
     }
 }
+
+
+pub struct LoginRequest{
+    pub email: String,
+    pub password: String,
+}
+
+pub async fn login_handler(Json(payload): Json<LoginRequest>, db: axum::extract::Extension<PgPool>,)
+ -> impl IntoResponse{
+    let user = sqlx::query!(
+        "SELECT id, username, password FROM users WHERE email = $1",
+        payload.email
+    ).fetch_optional(&db).await.unwrap();
+
+    if let Some(user) = user {
+        let parsed_hash = PasswordHash::new(&user.password).unwrap();
+
+        if Argon2::default().verify_password(payload.password.as_bytes(), parsed_hash).is_ok(){
+            let token  = create_jwt(&user.id.to_string());
+            return (StatusCode::OK, Json(serde_json::json!({
+                "message": "Login successful",
+                "token": token,
+                "user_id": user.id,
+                "username": user.username
+            })));
+        }
+    }
+ }
