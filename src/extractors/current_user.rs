@@ -1,7 +1,7 @@
 use axum::{
     async_trait,
     extract::FromRequestParts,
-    http::{request::Parts. StatusCode},
+    http::{request::Parts, StatusCode},
 };
 
 use crate::utils::jwt::decode_jwt;
@@ -11,9 +11,11 @@ pub struct CurrentUser{
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for CurrentUser 
-WHERE S:Send + Sync, 
+impl <S> FromRequestParts<S> for CurrentUser 
+where S:Send + Sync, 
 {
+    type Rejection = StatusCode;
+
     async fn from_request_parts(parts: &mut Parts, _state:&S) -> Result<Self, StatusCode> {
         //extract the Authorization header
         let auth_header = parts.headers.get("Authorization")
@@ -21,10 +23,10 @@ WHERE S:Send + Sync,
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
         //extract the token from the header
-        let token = auth_header.strip_prefix("Bearer")
-        .ok_or(StatusCode::UNAUTHORIZED)?
+        let token = auth_header.strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-        let claims = decode_wt(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let claims = decode_jwt(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
         //return the current usero
         Ok(CurrentUser {

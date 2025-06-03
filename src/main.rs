@@ -13,6 +13,7 @@ mod extractors;
 mod utils;
 mod routes;
 use routes::auth::auth_routes;
+use routes::dashboard::dashboard;
 
 
 
@@ -33,7 +34,8 @@ async fn main() {
     println!("Database connection pool created successfully");
 
     let app = Router::new()
-        .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
+        .nest("/auth", auth_routes(pool.clone())). // Mount the auth routes
+        route("/dashboard", get(dashboard)) // Add the dashboard route
         .route("/", get(root));
      
 
