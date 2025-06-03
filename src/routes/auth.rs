@@ -5,10 +5,11 @@ use argon2::{
 };
 use axum::{
     Router,
-    extract::{Json, State, Extension},
+    extract::{Json, State},
     routing::post,
     response::IntoResponse,
     http::StatusCode,
+    Extension,
 };
 use serde::Deserialize;
 use sqlx::{PgPool, query};
@@ -34,7 +35,7 @@ pub struct RegisterInput {
 pub fn auth_routes(pool:PgPool) -> Router {
     Router::new().route("/register", post(register))
     .route("/login", post(login_handler))
-    .with_state(pool)
+    .with_state(pool.clone())
     // You can add more routes here in the future
 }
 
@@ -91,7 +92,7 @@ pub struct LoginRequest{
     pub password: String,
 }
 
-pub async fn login_handler(Extension(db):Extension<PgPool>,Json(payload): Json<LoginRequest>, )
+pub async fn login_handler(State(db):State<PgPool>,Json(payload): Json<LoginRequest>, )
  -> impl IntoResponse{
     let user = sqlx::query!(
         "SELECT id, username, password FROM users WHERE email = $1",

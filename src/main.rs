@@ -9,6 +9,7 @@ use std::env;
 use std::net::SocketAddr;
 use tracing_subscriber;
 
+mod extractors;
 mod utils;
 mod routes;
 use routes::auth::auth_routes;
