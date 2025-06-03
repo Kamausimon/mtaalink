@@ -7,7 +7,8 @@ use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tracing_subscriber;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tower_http::trace::TraceLayer;
 
 mod extractors;
 mod utils;
@@ -20,7 +21,9 @@ use routes::dashboard::dashboard;
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    tracing_subscriber::fmt::init();
+       tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     println!("Using database URL: {}", database_url);
@@ -36,6 +39,7 @@ async fn main() {
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())). // Mount the auth routes
         route("/dashboard", get(dashboard)) // Add the dashboard route
+        .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
      
 
