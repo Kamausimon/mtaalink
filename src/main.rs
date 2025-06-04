@@ -13,6 +13,7 @@ use tower_http::trace::TraceLayer;
 mod extractors;
 mod utils;
 mod routes;
+use routes::service_providers::service_providers_routes;
 use routes::auth::auth_routes;
 use routes::dashboard::dashboard;
 
@@ -39,6 +40,7 @@ async fn main() {
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())). // Mount the auth routes
         route("/dashboard", get(dashboard)) // Add the dashboard route
+        .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
      
