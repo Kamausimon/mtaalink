@@ -46,6 +46,7 @@ pub fn auth_routes(pool:PgPool) -> Router {
     .route("/login", post(login_handler))
      .route("/me", get(me))
     .route("/forgot-password", post(forgot_password))
+    .route("/reset-password", post(reset_password))
     .with_state(pool.clone())
     // You can add more routes here in the future
 }
@@ -304,4 +305,71 @@ pub async fn forgot_password(
             Json(json!({ "message": "Database error" })),
         ),
     }
+}
+
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest{
+    pub token: String,
+    pub password: String,
+    pub confirm_password: String,
+}
+
+pub async fn reset_password(
+    State(pool): State<PgPool>, 
+    Json(payload): Json<ResetPasswordRequest>,
+) -> impl IntoResponse{
+     //validate the passwords 
+      if payload.password != payload.confirm_password {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "message": "Passwords do not match" }))
+                );}
+
+        //check if the token exists and is valid 
+        let record = sqlx::query!(
+            "SELECT user_id, expires_at FROM  password_resets WHERE token = $1",
+            payload.token
+        ).fetch_optional(&pool).await.unwrap();
+
+        let Some(reset) = record else {
+             return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "message": "Invalid or expired token" }))
+            );
+        };
+
+        if reset.expires_at < Utc::now().naive_utc() {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "message": "Token has expired" }))
+            );
+        }
+
+        // Hash the new password
+        let salt = SaltString::generate(&mut OsRng);
+        let hashed_password = Argon2::default()
+              .hash_password(payload.password.as_bytes(), &salt)
+              .unwrap()
+                .to_string();
+
+      //update the  user passwrd 
+      let _  = sqlx::query!(
+           "UPDATE users SET password = $1 WHERE id = $2",
+           hashed_password,
+           reset.user_id
+      ).execute(&pool).await;
+
+      //delete the reset tokem 
+       let _  = sqlx::query!(
+        "DELETE FROM password_resets where token = $1",
+        payload.token
+       ).execute(&pool).await;
+
+       //successfully reset the password
+       (
+           StatusCode::OK,
+           Json(json!({ "message": "Password reset successfully" }))
+       )
+
 }
