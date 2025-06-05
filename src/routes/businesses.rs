@@ -26,7 +26,7 @@ pub struct BusinessOnboardRequest {
     pub category: String,
     pub location: String,
     pub license_number: String,
-    #[validate(length(min = ))]
+    #[validate(length(min = 11))]
     pub krapin: String,
       #[validate(length(min = 10))]
     pub phone_number: String,
@@ -38,7 +38,7 @@ pub struct BusinessOnboardRequest {
 
 pub async fn onboard_business(
   CurrentUser {user_id}: CurrentUser,
-  State(Pool) : State<PgPool>,
+  State(pool) : State<PgPool>,
   Json(payload): Json<BusinessOnboardRequest>,
 )-> impl IntoResponse{
     if let Err(e) = payload.validate() {
@@ -57,22 +57,31 @@ pub async fn onboard_business(
         return (StatusCode::CONFLICT, Json(json!({"error": "Business already onboarded"})));
     }
 
-    let result = sqlx::query!(
-        "INSERT INTO businesses (user_id, business_name, description, category, location, license_number, krapin) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
-        user_id.parse::<i32>().unwrap(),
-        payload.business_name,
-        payload.description,
-        payload.category,
-        payload.location,
-        payload.license_number,
-        payload.krapin
-    )
-    .fetch_one(&pool)
-    .await;
+ let result = sqlx::query!(
+    "INSERT INTO businesses (
+        user_id, business_name, description, category, location,
+        license_number, krapin, phone_number, email, website, whatsapp
+    ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    ) RETURNING id",
+    user_id.parse::<i32>().unwrap(),
+    payload.business_name,
+    payload.description,
+    payload.category,
+    payload.location,
+    payload.license_number,
+    payload.krapin,
+    payload.phone_number,
+    payload.email,
+    payload.website,
+    payload.whatsapp
+)
+.fetch_one(&pool)
+.await;
+
 
     match result {
-        Ok(record) => (StatusCode::CREATED, Json(json!({"id": record.id}))),
+        Ok(record) => (StatusCode::CREATED, Json(json!({business_id: record.id, "message": "Business onboarded successfully"}))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
