@@ -26,10 +26,17 @@ pub struct ProviderOnboardRequest{
 
     pub category: String,
     pub location: String,
+    #[validate(length(min = 10))]
+    pub phone_number: String,
+    #[validate(email)]
+    pub email: String,
+    pub website: Option<String>,
+    pub whatsapp: Option<String>,
+
 }
 
 pub async fn onboard_service_provider(
-    CurrentUser(user_id): CurrentUser,
+    CurrentUser {user_id}: CurrentUser,
     State(pool): State<PgPool>,
     Json(payload): Json<ProviderOnboardRequest>,
 ) -> impl IntoResponse{
@@ -39,7 +46,7 @@ pub async fn onboard_service_provider(
     
        let exists = sqlx::query_scalar!(
         "SELECT 1 FROM providers WHERE user_id = $1 ",
-        user_id.parse::<i32>().unwrap();
+        user_id.parse::<i32>().unwrap()
        ).fetch_optional(&pool).await.unwrap();
 
        if exists.is_some(){
@@ -54,7 +61,11 @@ pub async fn onboard_service_provider(
           payload.service_description,
           payload.category,
           payload.location
-       ).execute(&pool).await;
+          payload.phone_number,
+          payload.email,
+            payload.website,
+            payload.whatsapp
+       ).fetch_one(&pool).await;
 
           match result {
             Ok(_) => {
