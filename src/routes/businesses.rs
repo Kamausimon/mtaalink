@@ -85,3 +85,160 @@ pub async fn onboard_business(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
+
+//filter business by category, name and location
+#[derive(Serialize, Debug)]
+pub struct BusinessQuery{
+    pub category: Option<String>,
+    pub name: Option<String>,
+    pub location: Option<String>,
+}
+
+struct Business{
+    pub id: i32,    
+    pub business_name: String,
+    pub description: String,
+    pub category: String,
+    pub location: String,
+    pub phone_number: String,
+    pub email: String,
+    pub website: Option<String>,
+    pub whatsapp: Option<String>,
+}
+
+pub  async fn filter_businesses(
+    State(pool): State<PgPool>,
+    Json(query): Json<BusinessQuery>,
+)-> impl IntoResponse{
+    let mut query = String::from(
+        r#"
+        SELECT 
+         b.id, b.business_name, b.description, b.category, b.location,
+         b.phone_number, b.email, b.website, b.whatsapp
+        FROM businesses b
+        JOIN users u ON b.user_id = u.id
+        WHERE 1=1
+        "#,
+    );
+
+    let mut bindings: Vec<String> = Vec::new();
+    met mut param_index = 1;
+
+    if let Some(ref category) = query.category {
+        query.push_str(&format!(" AND b.category = ${}", param_index));
+        param_index += 1;
+        bindings.push(category.to_string());
+    }
+
+if let Some(ref name) = query.name {
+    query.push_str(&format!(" AND b.business_name ILIKE ${}", param_index));
+    param_index += 1;
+    bindings.push(format!("%{}%", name));
+}
+
+
+   if let Some(ref location) = query.location {
+        query.push_str(&format!(" AND b.location ILIKE ${}", param_index));
+        param_index += 1;
+        bindings.push(format!("%{}%", location));
+    }
+
+    // Prepare query
+    let mut q = sqlx::query_as::<_, Business>(&query);
+    for bind in bindings {
+        q = q.bind(bind);
+    }
+
+    match q.fetch_all(&pool).await{
+        Ok(bindings) => Json(json!({
+            "businesses": bindings,
+            "message": "Businesses fetched successfully"
+        })),
+        Err(e) =>  Json(json!({"error": e.to_string()})),
+    }
+}
+
+#[derive(Deserialize, Debug, Validate)]
+Pub struct BusinessUpdateRequest {
+    #[validate(length(min = 3))]
+    pub business_name: Option<String>,
+    #[validate(length(min = 10))]
+    pub description: Option<String>,
+    pub location: Option<String>,
+    #[validate(length(min = 10))]
+    pub phone_number: Option<String>,
+    #[validate(email)]
+    pub email: Option<String>,
+    pub website: Option<String>,
+    pub whatsapp: Option<String>,
+}
+
+pub async fn update_business_profile(
+    CurrentUser {user_id}: CurrentUser,
+    State(pool): State<PgPool>,
+    Json(payload): Json<BusinessUpdateRequest>,
+)-> impl IntoResponse {
+     if let Err(e) = payload.validate() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+     }
+
+     let mut query = String::from(
+        "UPDATE businesses SET ");
+    let mut bindings: Vec<String> = Vec::new();
+    let mut updates = Vec::new();
+    let mut param_index = 1;
+
+    if let Some(ref value)  = payload.business_name {
+        updates.push(format!("business_name = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.description {
+        updates.push(format!("description = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.location {
+        updates.push(format!("location = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.phone_number {
+        updates.push(format!("phone_number = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.email {
+        updates.push(format!("email = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.website {
+        updates.push(format!("website = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if let Some(ref value) = payload.whatsapp {
+        updates.push(format!("whatsapp = ${}", param_index));
+        bindings.push(value.clone());
+        param_index += 1;
+    }
+    if updates.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "No fields to update"})));
+    }
+
+    query.push_str(&updates.join(", "));
+      query.push_str(&format!("WHERE user_id = ${}", idx));
+        bindings.push(user_id.to_string());
+ 
+
+        let mut q = sqlx::query(&query);
+    for bind in bindings {
+        q = q.bind(bind);
+    }
+
+    match q.execute(&pool).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Business profile updated successfully"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}

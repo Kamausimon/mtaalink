@@ -98,75 +98,162 @@ pub async fn onboard_service_provider(
     }
 
     pub async fn list_providers(
-        State(pool): State<PgPool>,
-        Query(params): Query<ProviderQuery>,
-    )-> impl IntoResponse{
-        //  let mut query = String::from(
-        //     r#"
-        //     SELECT 
-        //     p.id, p.service_name, p.category, p.location, p.email, p.phone_number, p.website
-        //     FROM providers p
-        //      JOIN users u on p.user_id = u.id
-        //      where 1=1
-        //      "#,
-        //  );
+    State(pool): State<PgPool>,
+    Query(params): Query<ProviderQuery>,
+) -> impl IntoResponse {
+    let mut query = String::from(
+        r#"
+        SELECT 
+            p.id, p.service_name, p.category, p.location, p.email, p.phone_number, p.website
+        FROM providers p
+        JOIN users u ON p.user_id = u.id
+        WHERE 1=1
+        "#,
+    );
 
-        //  let mut bindings = Vec::new();
+    let mut bindings: Vec<String> = Vec::new();
+    let mut param_index = 1;
+  
 
-        //  if let Some(ref category) = params.category{
-        //     query.push_str("AND p.category = $1 ");
-        //     bindings.push(category.to_string());
-        //  }
-
-        //  if let Some(ref location) = params.location{
-        //     if bindings.is_empty(){
-        //         query.push_str("AND p.location = $1 ");
-        //     } else {
-        //         query.push_str("AND p.location = $2 ");
-        //     }
-        //     bindings.push(location.to_string());
-        //  }
-
-        //  let providers = match bindings.len(){
-        //     0 => sqlx::query_as::<_, PublicProvider>(&query)
-        //         .fetch_all(&pool)
-        //         .await,
-        //     1 => sqlx::query_as::<_, PublicProvider>(&query)
-        //         .bind(&bindings[0])
-        //         .fetch_all(&pool)
-        //         .await,
-        //     2 => sqlx::query_as::<_, PublicProvider>(&query)
-        //         .bind(&bindings[0])
-        //         .bind(&bindings[1])
-        //         .fetch_all(&pool)
-        //         .await,
-        //     _ => unreachable!(),
-        //  };
-
-        let mut builder = QueryBuilder::new("SELECT * FROM providers WHERE 1=1" );
-
-        if let Some(category) = &params.category{
-            builder.push("AND category = ").
-                push_bind(category);
-        }
-
-        if let Some(location) = &params.location{
-            builder.push("AND location = ").
-                push_bind(location);
-        }
-
-        let query = builder.build_query_as::<PublicProvider>();
-        let providers_result = query.fetch_all(&pool).await;
-
-         match providers_result {
-    Ok(providers) => Json(json!({
-        "status": "success",
-        "providers": providers
-    })),
-    Err(e) => Json(json!({
-        "status": "error",
-        "message": e.to_string()
-    })),
-}
+    if let Some(ref category) = params.category {
+        query.push_str(&format!(" AND p.category = ${}", param_index));
+        param_index += 1;
+        bindings.push(category.to_string());
     }
+
+    if let Some(ref location) = params.location {
+        query.push_str(&format!(" AND p.location = ${}", param_index));
+        bindings.push(location.to_string());
+    }
+
+    // Prepare query
+    let mut q = sqlx::query_as::<_, PublicProvider>(&query);
+    for bind in bindings {
+        q = q.bind(bind);
+    }
+
+   
+  
+
+    // Execute
+    match q.fetch_all(&pool).await {
+        Ok(bindings) => Json(json!({
+            "status": "success",
+            "providers": bindings
+                .into_iter()
+                .map(|p| json!({
+                    "id": p.id,
+                    "service_name": p.service_name,
+                    "category": p.category,
+                    "location": p.location,
+                    "email": p.email,
+                    "phone_number": p.phone_number,
+                    "website": p.website
+                }))
+                .collect::<Vec<_>>()
+        })),
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+
+#[derive(Deserialize, Debug, Validate)]
+pub struct UpdateProviderProfileRequest{
+    #[validate(length(min = 3))]
+    pub service_name: Option<String>,
+    #[validate(length(min = 10))]
+    pub service_description: Option<String>,
+    pub location: Option<String>,
+    #[validate(length(min = 10))]
+    pub phone_number: Option<String>,
+    #[validate(email)]
+    pub email: Option<String>,
+    pub website: Option<String>,
+    pub whatsapp: Option<String>,
+}
+
+pub async fn update_provider_profile(
+    CurrentUser {user_id}: CurrentUser,
+    State(pool): State<PgPool>,
+    Json(payload): Json<UpdateProviderProfileRequest>,
+)-> impl IntoResponse { 
+       if let Err(e) = payload.validate() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+     }
+
+      let mut query = String::from(
+    "UPDATE providers SET "
+      );
+      let mut updates = vec![];
+      let mut bindings: Vec<String> = Vec::new();
+      let mut idx = 1;
+
+      if let Some(ref value) = payload.service_name {
+        updates.push(format!("service_name = ${}", idx));
+        bindings.push(value.clone());
+        idx += 1;
+      }
+
+        if let Some(ref value) = payload.service_description {
+            updates.push(format!("service_description = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+
+       
+        if let Some(ref value) = payload.location {
+            updates.push(format!("location = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+
+        if let Some(ref value) = payload.phone_number {
+            updates.push(format!("phone_number = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+
+        if let Some(ref value) = payload.email {
+            updates.push(format!("email = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+
+        if let Some(ref value) = payload.website {
+            updates.push(format!("website = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+
+        if let Some(ref value) = payload.whatsapp {
+            updates.push(format!("whatsapp = ${}", idx));
+            bindings.push(value.clone());
+            idx += 1;
+        }
+        if updates.is_empty() {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "No fields to update"})));
+        }
+
+        query.push_str(&updates.join(", "));
+        query.push_str(&format!("WHERE user_id = ${}", idx));
+        bindings.push(user_id.to_string());
+
+        let mut q = sqlx::query(&query);
+        for b in bindings{
+            q = q.bind(b);
+        }
+
+        match q.execute(&pool).await {
+            Ok(_) => {
+                (StatusCode::OK, Json(json!({"message": "Profile updated successfully"})))
+            },
+            Err(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))
+            }
+        }
+
+}
 
