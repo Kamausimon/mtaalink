@@ -1,29 +1,24 @@
-use axum::{
-    Router,
-    routing::{get,},
-};
+use axum::{Router, routing::get};
 use axum_server::bind;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod extractors;
-mod utils;
 mod routes;
-use routes::service_providers::service_providers_routes;
-use routes::businesses::businesses_routes;
+mod utils;
 use routes::auth::auth_routes;
+use routes::businesses::businesses_routes;
 use routes::dashboard::dashboard;
-
-
+use routes::service_providers::service_providers_routes;
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-       tracing_subscriber::registry()
+    tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -45,7 +40,6 @@ async fn main() {
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
-     
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
     let addr = SocketAddr::from(([127, 0, 0, 1], port.parse::<u16>().unwrap()));

@@ -1,14 +1,14 @@
+use crate::extractors::current_user::CurrentUser;
 use axum::{
     Router,
-    extract::{Json, State,Query},
+    extract::{Json, Query, State},
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    http::StatusCode,
 };
-use sqlx::PgPool;
-use serde_json::json;
-use crate::extractors::current_user::CurrentUser;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sqlx::PgPool;
 use validator::Validate;
 
 pub fn businesses_routes(pool: PgPool) -> Router {
@@ -30,7 +30,7 @@ pub struct BusinessOnboardRequest {
     pub license_number: String,
     #[validate(length(min = 11))]
     pub krapin: String,
-      #[validate(length(min = 10))]
+    #[validate(length(min = 10))]
     pub phone_number: String,
     #[validate(email)]
     pub email: String,
@@ -39,12 +39,15 @@ pub struct BusinessOnboardRequest {
 }
 
 pub async fn onboard_business(
-  CurrentUser {user_id}: CurrentUser,
-  State(pool) : State<PgPool>,
-  Json(payload): Json<BusinessOnboardRequest>,
-)-> impl IntoResponse{
+    CurrentUser { user_id }: CurrentUser,
+    State(pool): State<PgPool>,
+    Json(payload): Json<BusinessOnboardRequest>,
+) -> impl IntoResponse {
     if let Err(e) = payload.validate() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        );
     }
 
     let exists = sqlx::query_scalar!(
@@ -56,49 +59,57 @@ pub async fn onboard_business(
     .unwrap();
 
     if exists.is_some() {
-        return (StatusCode::CONFLICT, Json(json!({"error": "Business already onboarded"})));
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "Business already onboarded"})),
+        );
     }
 
- let result = sqlx::query!(
-    "INSERT INTO businesses (
+    let result = sqlx::query!(
+        "INSERT INTO businesses (
         user_id, business_name, description, category, location,
         license_number, krapin, phone_number, email, website, whatsapp
     ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
     ) RETURNING id",
-    user_id.parse::<i32>().unwrap(),
-    payload.business_name,
-    payload.description,
-    payload.category,
-    payload.location,
-    payload.license_number,
-    payload.krapin,
-    payload.phone_number,
-    payload.email,
-    payload.website,
-    payload.whatsapp
-)
-.fetch_one(&pool)
-.await;
-
+        user_id.parse::<i32>().unwrap(),
+        payload.business_name,
+        payload.description,
+        payload.category,
+        payload.location,
+        payload.license_number,
+        payload.krapin,
+        payload.phone_number,
+        payload.email,
+        payload.website,
+        payload.whatsapp
+    )
+    .fetch_one(&pool)
+    .await;
 
     match result {
-        Ok(record) => (StatusCode::CREATED, Json(json!({ "message": "Business onboarded successfully"}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+        Ok(record) => (
+            StatusCode::CREATED,
+            Json(json!({ "message": "Business onboarded successfully"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
     }
 }
 
 //filter business by category, name and location
 #[derive(Deserialize, Debug)]
-pub struct BusinessQuery{
+pub struct BusinessQuery {
     pub category: Option<String>,
     pub business_name: Option<String>,
     pub location: Option<String>,
 }
 
-#[derive(Serialize, Debug,sqlx::FromRow)]
-struct BusinessProvider{
-    pub id: i32,    
+#[derive(Serialize, Debug, sqlx::FromRow)]
+struct BusinessProvider {
+    pub id: i32,
     pub business_name: String,
     pub description: String,
     pub category: String,
@@ -109,10 +120,10 @@ struct BusinessProvider{
     pub whatsapp: Option<String>,
 }
 
-pub  async fn list_businesses(
+pub async fn list_businesses(
     State(pool): State<PgPool>,
     Query(params): Query<BusinessQuery>,
-)-> impl IntoResponse{
+) -> impl IntoResponse {
     let mut query = String::from(
         r#"
         SELECT 
@@ -133,14 +144,13 @@ pub  async fn list_businesses(
         bindings.push(category.to_string());
     }
 
-if let Some(ref business_name) = params.business_name {
-    query.push_str(&format!(" AND b.business_name ILIKE ${}", param_index));
-    param_index += 1;
-    bindings.push(format!("%{}%", business_name));
-}
+    if let Some(ref business_name) = params.business_name {
+        query.push_str(&format!(" AND b.business_name ILIKE ${}", param_index));
+        param_index += 1;
+        bindings.push(format!("%{}%", business_name));
+    }
 
-
-   if let Some(ref location) = params.location {
+    if let Some(ref location) = params.location {
         query.push_str(&format!(" AND b.location ILIKE ${}", param_index));
         bindings.push(format!("%{}%", location));
     }
@@ -151,13 +161,13 @@ if let Some(ref business_name) = params.business_name {
         q = q.bind(bind);
     }
 
-    match q.fetch_all(&pool).await{
+    match q.fetch_all(&pool).await {
         Ok(bindings) => Json(json!({
             "message": "Businesses fetched successfully",
             "businesses": bindings,
-            
+
         })),
-        Err(e) =>  Json(json!({"error": e.to_string()})),
+        Err(e) => Json(json!({"error": e.to_string()})),
     }
 }
 
@@ -177,21 +187,23 @@ pub struct BusinessUpdateRequest {
 }
 
 pub async fn update_business_profile(
-    CurrentUser {user_id}: CurrentUser,
+    CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
     Json(payload): Json<BusinessUpdateRequest>,
-)-> impl IntoResponse {
-     if let Err(e) = payload.validate() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
-     }
+) -> impl IntoResponse {
+    if let Err(e) = payload.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        );
+    }
 
-     let mut query = String::from(
-        "UPDATE businesses SET ");
+    let mut query = String::from("UPDATE businesses SET ");
     let mut bindings: Vec<String> = Vec::new();
     let mut updates = Vec::new();
     let mut param_index = 1;
 
-    if let Some(ref value)  = payload.business_name {
+    if let Some(ref value) = payload.business_name {
         updates.push(format!("business_name = ${}", param_index));
         bindings.push(value.clone());
         param_index += 1;
@@ -227,21 +239,31 @@ pub async fn update_business_profile(
         param_index += 1;
     }
     if updates.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "No fields to update"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "No fields to update"})),
+        );
     }
 
     query.push_str(&updates.join(", "));
-      query.push_str(&format!("WHERE user_id = ${}", param_index));
-        bindings.push(user_id.to_string());
- 
+    query.push_str(&format!("WHERE user_id = ${}", param_index));
+   let user_id = user_id.parse::<i32>().unwrap();
 
-        let mut q = sqlx::query(&query);
+    let mut q = sqlx::query(&query);
     for bind in bindings {
         q = q.bind(bind);
     }
 
+    q = q.bind(user_id);
+
     match q.execute(&pool).await {
-        Ok(_) => (StatusCode::OK, Json(json!({"message": "Business profile updated successfully"}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({"message": "Business profile updated successfully"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
     }
 }
