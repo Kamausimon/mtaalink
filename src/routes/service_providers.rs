@@ -17,6 +17,7 @@ pub fn service_providers_routes(pool:PgPool) -> Router {
     Router::new()
         .route("/onboard", post(onboard_service_provider))
         .route("/listProviders", get(list_providers))
+        .route("/updateProfile", post(update_provider_profile))
         .with_state(pool.clone())
 }
 
@@ -184,12 +185,16 @@ pub async fn update_provider_profile(
         return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
      }
 
+     println!("payload: {:?}", payload);
+
       let mut query = String::from(
     "UPDATE providers SET "
       );
       let mut updates = vec![];
       let mut bindings: Vec<String> = Vec::new();
       let mut idx = 1;
+      println!("updates: {:?}", updates);
+      println!("bindings: {:?}", bindings);
 
       if let Some(ref value) = payload.service_name {
         updates.push(format!("service_name = ${}", idx));
@@ -238,7 +243,8 @@ pub async fn update_provider_profile(
         }
 
         query.push_str(&updates.join(", "));
-        query.push_str(&format!("WHERE user_id = ${}", idx));
+        query.push_str(&format!(" WHERE user_id = ${}", idx));
+        let user_id: i32 = user_id.parse().unwrap_or(0);
         bindings.push(user_id.to_string());
 
         let mut q = sqlx::query(&query);

@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Json, State},
+    extract::{Json, State,Query},
     response::IntoResponse,
     routing::{get, post},
     http::StatusCode,
@@ -14,6 +14,8 @@ use validator::Validate;
 pub fn businesses_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/onboard", post(onboard_business))
+        .route("/listBusinesses", get(list_businesses))
+        .route("/updateProfile", post(update_business_profile))
         .with_state(pool.clone())
 }
 
@@ -81,20 +83,21 @@ pub async fn onboard_business(
 
 
     match result {
-        Ok(record) => (StatusCode::CREATED, Json(json!({business_id: record.id, "message": "Business onboarded successfully"}))),
+        Ok(record) => (StatusCode::CREATED, Json(json!({ "message": "Business onboarded successfully"}))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
 
 //filter business by category, name and location
-#[derive(Serialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct BusinessQuery{
     pub category: Option<String>,
-    pub name: Option<String>,
+    pub business_name: Option<String>,
     pub location: Option<String>,
 }
 
-struct Business{
+#[derive(Serialize, Debug,sqlx::FromRow)]
+struct BusinessProvider{
     pub id: i32,    
     pub business_name: String,
     pub description: String,
@@ -106,9 +109,9 @@ struct Business{
     pub whatsapp: Option<String>,
 }
 
-pub  async fn filter_businesses(
+pub  async fn list_businesses(
     State(pool): State<PgPool>,
-    Json(query): Json<BusinessQuery>,
+    Query(params): Query<BusinessQuery>,
 )-> impl IntoResponse{
     let mut query = String::from(
         r#"
@@ -122,44 +125,44 @@ pub  async fn filter_businesses(
     );
 
     let mut bindings: Vec<String> = Vec::new();
-    met mut param_index = 1;
+    let mut param_index = 1;
 
-    if let Some(ref category) = query.category {
+    if let Some(ref category) = params.category {
         query.push_str(&format!(" AND b.category = ${}", param_index));
         param_index += 1;
         bindings.push(category.to_string());
     }
 
-if let Some(ref name) = query.name {
+if let Some(ref business_name) = params.business_name {
     query.push_str(&format!(" AND b.business_name ILIKE ${}", param_index));
     param_index += 1;
-    bindings.push(format!("%{}%", name));
+    bindings.push(format!("%{}%", business_name));
 }
 
 
-   if let Some(ref location) = query.location {
+   if let Some(ref location) = params.location {
         query.push_str(&format!(" AND b.location ILIKE ${}", param_index));
-        param_index += 1;
         bindings.push(format!("%{}%", location));
     }
 
     // Prepare query
-    let mut q = sqlx::query_as::<_, Business>(&query);
+    let mut q = sqlx::query_as::<_, BusinessProvider>(&query);
     for bind in bindings {
         q = q.bind(bind);
     }
 
     match q.fetch_all(&pool).await{
         Ok(bindings) => Json(json!({
+            "message": "Businesses fetched successfully",
             "businesses": bindings,
-            "message": "Businesses fetched successfully"
+            
         })),
         Err(e) =>  Json(json!({"error": e.to_string()})),
     }
 }
 
 #[derive(Deserialize, Debug, Validate)]
-Pub struct BusinessUpdateRequest {
+pub struct BusinessUpdateRequest {
     #[validate(length(min = 3))]
     pub business_name: Option<String>,
     #[validate(length(min = 10))]
@@ -228,7 +231,7 @@ pub async fn update_business_profile(
     }
 
     query.push_str(&updates.join(", "));
-      query.push_str(&format!("WHERE user_id = ${}", idx));
+      query.push_str(&format!("WHERE user_id = ${}", param_index));
         bindings.push(user_id.to_string());
  
 
