@@ -14,6 +14,7 @@ mod extractors;
 mod utils;
 mod routes;
 use routes::service_providers::service_providers_routes;
+use routes::businesses::businesses_routes;
 use routes::auth::auth_routes;
 use routes::dashboard::dashboard;
 
@@ -41,6 +42,7 @@ async fn main() {
         .nest("/auth", auth_routes(pool.clone())). // Mount the auth routes
         route("/dashboard", get(dashboard)) // Add the dashboard route
         .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
+        .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
      
