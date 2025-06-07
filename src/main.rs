@@ -6,6 +6,7 @@ use std::env;
 use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tower_http::cors::CorsLayer;
 
 mod extractors;
 mod routes;
@@ -25,6 +26,11 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     println!("Using database URL: {}", database_url);
 
+    // Enable CORS for all origins
+    let cors_layer = CorsLayer::permissive()
+        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+        .allow_headers(vec!["Content-Type", "Authorization"]);
+
     // Create a connection pool
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -39,6 +45,7 @@ async fn main() {
         .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
+        .layer(cors_layer) // Add CORS layer
         .route("/", get(root));
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
