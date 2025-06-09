@@ -16,6 +16,8 @@ use routes::auth::auth_routes;
 use routes::businesses::businesses_routes;
 use routes::dashboard::dashboard;
 use routes::service_providers::service_providers_routes;
+use routes::clients::client_routes;
+use routes::reviews::reviews_routes;
 
 #[tokio::main]
 async fn main() {
@@ -40,13 +42,14 @@ async fn main() {
     println!("Database connection pool created successfully");
 
     let app = Router::new()
-        .nest("/auth", auth_routes(pool.clone())). // Mount the auth routes
-        route("/dashboard", get(dashboard)) // Add the dashboard route
+        .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
+        .route("/dashboard", get(dashboard)) // Add the dashboard route
         .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
+        .nest("/clients", client_routes(pool.clone())) // Mount the clients routes
+        .nest("/reviews", reviews_routes(pool.clone())) // Mount the reviews routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
-        .layer(cors_layer) // Add CORS layer
         .route("/", get(root));
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());

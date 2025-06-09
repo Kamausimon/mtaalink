@@ -1,5 +1,5 @@
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::image_upload::save_image_to_fs as upload_image;
+use crate::utils::image_upload::save_image_to_fs;
 use axum::{
     Router,
     extract::Query,
@@ -284,9 +284,10 @@ pub async fn upload_provider_profile_photo(
 ) -> impl IntoResponse {
     let dir = "uploads/providers/profile_photos";
 
-    match upload_image(multipart, dir).await {
+    match save_image_to_fs(multipart, dir).await {
         Ok(file_name) => {
             let file_url = format!("/uploads/providers/profile_photos/{}", file_name);
+            println!("File URL: {}", file_url);
 
             let _ = sqlx::query!(
                 "UPDATE providers SET profile_photo = $1 WHERE user_id = $2",
@@ -324,7 +325,7 @@ pub async fn upload_provider_cover_photo(
 ) -> impl IntoResponse {
     let dir = "uploads/providers/cover_photos";
 
-    match upload_image(multipart, dir).await {
+    match save_image_to_fs(multipart, dir).await {
         Ok(file_name) => {
             let file_url = format!("/uploads/providers/cover_photos/{}", file_name);
 
@@ -343,3 +344,5 @@ pub async fn upload_provider_cover_photo(
         },
     }
 }
+
+

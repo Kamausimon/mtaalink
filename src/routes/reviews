@@ -1,0 +1,184 @@
+use crate:extractors::current_user::CurrentUser;
+use axum::{
+    Router,
+    extract::{State, Json, Query},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
+use serde_json::json;
+use sqlx::PgPool;
+use validator::Validate;
+
+pub fn reviews_routes(pool: PgPool) -> Router {
+    Router::new()
+        .route("/create", post(create_review))
+        .route("/get", get(get_reviews))
+        .with_state(pool)
+}
+
+#[derive(serde::Deserialize, Debug, Validate)]
+pub struct Review{
+    #[validate(length(min = 1, message = "Review content cannot be empty"))]
+    comment: String,
+    rating: i32,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ReviewQuery{
+    target_type: String, // This can be "service_provider", "business", etc.
+    target_id: i32,
+}
+
+pub async fn create_review(
+    State(pool): State<PgPool>,
+    Query(params): Query<ReviewQuery>,
+    Json(payload): Json<Review>,
+    CurrentUser { user_id }: CurrentUser,
+) -> impl IntoResponse {
+      //validate the payload
+  if let Err(e) = payload.validate() {
+    return (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "message": format!("Invalid review data: {}", e) })),
+    );
+}
+    //check if the comment is empty
+      if payload.comment.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "message": "Comment cannot be empty" })),
+        );
+      }
+  
+    //get reviewer id from the current user
+    let reviewer_id = user_id.parse::<i32>().unwrap();
+
+     let target_type = params.target_type.to_lowercase();
+     let target_id = params.target_id;
+
+    if target.id <= 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "message": "Invalid target ID. Must be greater than 0" })),
+        )
+    } 
+
+    //check if the target exists 
+    let target.exists  = match target_type.as_str() {
+        "service_provider" => sqlx::query!(
+            "SELECT id FROM service_providers WHERE id = $1",
+            target_id
+        ).fetch_optional(&pool).await,
+        "business" => sqlx::query!(
+            "SELECT id FROM businesses WHERE id = $1",
+            target_id
+        ).fetch_optional(&pool).await,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "message": "Invalid target type" })),
+            );
+        }
+    };
+
+    if target.exists.is_err() || target.exists.unwrap().is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "message": "Target not found" })),
+        );
+    }
+  
+
+    //prevent duplicate reviews
+    let existing_review = sqlx::query!(
+        "SELECT id FROM reviews WHERE reviewer_id = $1 AND target_type = $2 AND target_id = $3",
+        reviewer_id,
+        target_type,
+        target_id
+    ).fetch_optional(&pool).await;
+    if existing_review.is_ok() && existing_review.unwrap().is_some() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "message": "You have already reviewed this service provider" })),
+        );
+    }
+
+    //only allow reviews for service providers that the user has interacted with
+    // let interaction_exists = sqlx::query!(
+    //     "SELECT id FROM interactions WHERE user_id = $1 AND provider_id = $2",
+    //     reviewer_id,
+    //     provider_id
+    // ).fetch_optional(&pool).await;
+
+    //insert the review into the database
+let insert_review = sqlx::query!(
+    "INSERT INTO reviews (reviewer_id, target_type, target_id, rating, comment)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id",
+    reviewer_id,
+    target_type,
+    target_id,
+    payload.rating,
+    payload.comment
+    ).fetch_one(&pool).await;
+
+
+       
+        match review {
+            Ok(review) => {
+                (
+                    StatusCode::CREATED,
+                    Json(json!({ "message": "Review created successfully", "review_id": review.id })),
+                )
+            }
+            Err(e) => {
+                eprintln!("Error creating review: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "message": "Failed to create review" })),
+                )
+            }
+        }
+
+}
+
+pub async fn get_reviews(
+    State(pool): State<PgPool>,
+    Query(params): Query<ReviewQuery>,
+) -> impl IntoResponse {
+    let target_type = params.target_type.to_lowercase();
+
+    if target_type != "service_provider" && target_type != "business" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "message": "Invalid target type. Must be 'service_provider' or 'business'" })),
+        );
+    }
+
+    if params.target_id <= 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "message": "Invalid target ID. Must be greater than 0" })),
+        );
+    }
+
+    let reviews = sqlx::query!(
+        "SELECT id, reviewer_id, rating, comment, created_at 
+         FROM reviews 
+         WHERE target_type = $1 AND target_id = $2 
+         ORDER BY created_at DESC",
+        target_type,
+        params.target_id
+    )
+    .fetch_all(&pool)
+    .await;
+
+    match reviews {
+        Ok(data) => (StatusCode::OK, Json(json!({ "reviews": data }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": format!("Failed to fetch reviews: {}", e) })),
+        ),
+    }
+}
