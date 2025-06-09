@@ -1,7 +1,8 @@
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::image_upload::save_image_to_fs;
 use axum::{
     Router,
-    extract::{Json, Query, State},
+    extract::{Json, Query, State, Multipart},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -16,6 +17,9 @@ pub fn businesses_routes(pool: PgPool) -> Router {
         .route("/onboard", post(onboard_business))
         .route("/listBusinesses", get(list_businesses))
         .route("/updateProfile", post(update_business_profile))
+        .route("/uploadLogo", post(upload_business_logo))
+        .route("/uploadProfilePicture", post(upload_business_profile_picture))
+        .route("/uploadCoverPhoto", post(upload_business_cover_photo))
         .with_state(pool.clone())
 }
 
@@ -267,3 +271,109 @@ pub async fn update_business_profile(
         ),
     }
 }
+
+pub async fn upload_business_logo(
+    CurrentUser { user_id }: CurrentUser,
+    State(pool): State<PgPool>,
+    multipart: Multipart,
+) -> impl IntoResponse {
+    let upload_dir = "uploads/businesses/business_logos";
+    match save_image_to_fs(multipart, upload_dir).await {
+        Ok(file_name) => {
+            let logo_path = format!("{}/{}", upload_dir, file_name);
+            let result = sqlx::query!(
+                "UPDATE businesses SET logo = $1 WHERE user_id = $2",
+                logo_path,
+                user_id.parse::<i32>().unwrap()
+            )
+            .execute(&pool)
+            .await;
+
+            match result {
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(json!({"message": "Logo uploaded successfully", "logo": logo_path})),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),
+            }
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        ),
+    }
+}
+
+pub async fn upload_business_profile_picture(
+    CurrentUser { user_id }: CurrentUser,
+    State(pool): State<PgPool>,
+    multipart: Multipart,
+) -> impl IntoResponse {
+    let upload_dir = "uploads/businesses/business_profile_pictures";
+    match save_image_to_fs(multipart, upload_dir).await {
+        Ok(file_name) => {
+            let profile_picture_path = format!("{}/{}", upload_dir, file_name);
+            let result = sqlx::query!(
+                "UPDATE businesses SET profile_photo = $1 WHERE user_id = $2",
+                profile_picture_path,
+                user_id.parse::<i32>().unwrap()
+            )
+            .execute(&pool)
+            .await;
+
+            match result {
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(json!({"message": "Profile picture uploaded successfully", "profile_picture": profile_picture_path})),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),
+            }
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        ),
+    }
+}
+
+pub async fn upload_business_cover_photo(
+    CurrentUser { user_id }: CurrentUser,
+    State(pool): State<PgPool>,
+    multipart: Multipart,
+) -> impl IntoResponse {
+    let upload_dir = "uploads/businesses/business_cover_photos";
+    match save_image_to_fs(multipart, upload_dir).await {
+        Ok(file_name) => {
+            let cover_photo_path = format!("{}/{}", upload_dir, file_name);
+            let result = sqlx::query!(
+                "UPDATE businesses SET cover_photo = $1 WHERE user_id = $2",
+                cover_photo_path,
+                user_id.parse::<i32>().unwrap()
+            )
+            .execute(&pool)
+            .await;
+
+            match result {
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(json!({"message": "Cover photo uploaded successfully", "cover_photo": cover_photo_path})),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),
+            }
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        ),
+    }
+}
+

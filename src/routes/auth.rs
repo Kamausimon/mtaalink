@@ -1,4 +1,5 @@
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::image_upload::save_image_to_fs;
 use crate::utils::jwt::create_jwt;
 use argon2::{
     Argon2, PasswordVerifier,
@@ -6,7 +7,7 @@ use argon2::{
 };
 use axum::{
     Router,
-    extract::{Json, State},
+    extract::{Json, State,Multipart},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -394,3 +395,4 @@ pub async fn reset_password(
         Json(json!({ "message": "Password reset successfully" })),
     )
 }
+
