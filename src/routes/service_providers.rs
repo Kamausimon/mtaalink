@@ -1,8 +1,9 @@
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::image_upload::save_image_to_fs as upload_image;
 use axum::{
     Router,
     extract::Query,
-    extract::{Json, State},
+    extract::{Json, State, Multipart},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -18,6 +19,8 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
         .route("/onboard", post(onboard_service_provider))
         .route("/listProviders", get(list_providers))
         .route("/updateProfile", post(update_provider_profile))
+        .route("/uploadProfilePhoto", post(upload_provider_profile_photo))
+        .route("/uploadCoverPhoto", post(upload_provider_cover_photo))
         .with_state(pool.clone())
 }
 
@@ -271,5 +274,72 @@ pub async fn update_provider_profile(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),
         ),
+    }
+}
+
+pub async fn upload_provider_profile_photo(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    multipart: Multipart,
+) -> impl IntoResponse {
+    let dir = "uploads/providers/profile_photos";
+
+    match upload_image(multipart, dir).await {
+        Ok(file_name) => {
+            let file_url = format!("/uploads/providers/profile_photos/{}", file_name);
+
+            let _ = sqlx::query!(
+                "UPDATE providers SET profile_photo = $1 WHERE user_id = $2",
+                file_url,
+                user_id.parse::<i32>().unwrap()
+            )
+            .execute(&pool)
+            .await;
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "message": "Profile photo uploaded successfully",
+                    "url": file_url
+                })),
+            )
+        }
+
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "Failed to upload profile photo",
+                "details": e
+            })),
+        ),
+    }
+}
+
+
+
+pub async fn upload_provider_cover_photo(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    multipart: Multipart,
+) -> impl IntoResponse {
+    let dir = "uploads/providers/cover_photos";
+
+    match upload_image(multipart, dir).await {
+        Ok(file_name) => {
+            let file_url = format!("/uploads/providers/cover_photos/{}", file_name);
+
+            let _ = sqlx::query!("UPDATE providers SET cover_photo = $1 WHERE user_id = $2",
+                file_url, user_id.parse::<i32>().unwrap())
+                .execute(&pool)
+                .await;
+
+            (StatusCode::OK, Json(json!({"message": "Cover photo uploaded successfully", "url": file_url})))
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        },
     }
 }
