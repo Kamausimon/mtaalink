@@ -23,4 +23,7 @@ axum-params = "0.4"
 aws-config = "1.1"
 aws-sdk-s3 = "1.12"
 tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace","full"] }
+tower = "0.4"
+multipart = "0.18"
+tokio-util = "0.7"

@@ -7,6 +7,7 @@ use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 mod extractors;
 mod routes;
@@ -27,9 +28,8 @@ async fn main() {
     println!("Using database URL: {}", database_url);
 
     // Enable CORS for all origins
-    let cors_layer = CorsLayer::permissive()
-        .allow_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
-        .allow_headers(vec!["Content-Type", "Authorization"]);
+    let cors_layer = CorsLayer::permissive();
+
 
     // Create a connection pool
     let pool = PgPoolOptions::new()
@@ -44,6 +44,7 @@ async fn main() {
         route("/dashboard", get(dashboard)) // Add the dashboard route
         .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
+        .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .layer(cors_layer) // Add CORS layer
         .route("/", get(root));
