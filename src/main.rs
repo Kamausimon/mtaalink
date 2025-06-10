@@ -12,12 +12,14 @@ use tower_http::services::ServeDir;
 mod extractors;
 mod routes;
 mod utils;
+
 use routes::auth::auth_routes;
 use routes::businesses::businesses_routes;
 use routes::dashboard::dashboard;
 use routes::service_providers::service_providers_routes;
 use routes::clients::client_routes;
 use routes::reviews::reviews_routes;
+use routes::favorites::favorites_routes;
 
 #[tokio::main]
 async fn main() {
@@ -48,6 +50,7 @@ async fn main() {
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
         .nest("/clients", client_routes(pool.clone())) // Mount the clients routes
         .nest("/reviews", reviews_routes(pool.clone())) // Mount the reviews routes
+        .nest("/favorites", favorites_routes(pool.clone())) // Mount the favorites routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
