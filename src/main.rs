@@ -21,6 +21,7 @@ use routes::favorites::favorites_routes;
 use routes::messages::messages_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
+use routes::categories::category_routes;
 
 #[tokio::main]
 async fn main() {
