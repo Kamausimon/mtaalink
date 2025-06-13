@@ -4,10 +4,10 @@ use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tower_http::trace::TraceLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod extractors;
 mod routes;
@@ -15,11 +15,12 @@ mod utils;
 
 use routes::auth::auth_routes;
 use routes::businesses::businesses_routes;
-use routes::dashboard::dashboard;
-use routes::service_providers::service_providers_routes;
 use routes::clients::client_routes;
-use routes::reviews::reviews_routes;
+use routes::dashboard::dashboard;
 use routes::favorites::favorites_routes;
+use routes::messages::messages_routes;
+use routes::reviews::reviews_routes;
+use routes::service_providers::service_providers_routes;
 
 #[tokio::main]
 async fn main() {
@@ -33,7 +34,6 @@ async fn main() {
 
     // Enable CORS for all origins
     let cors_layer = CorsLayer::permissive();
-
 
     // Create a connection pool
     let pool = PgPoolOptions::new()
@@ -51,6 +51,7 @@ async fn main() {
         .nest("/clients", client_routes(pool.clone())) // Mount the clients routes
         .nest("/reviews", reviews_routes(pool.clone())) // Mount the reviews routes
         .nest("/favorites", favorites_routes(pool.clone())) // Mount the favorites routes
+        .nest("/messages", messages_routes(pool.clone())) // Mount the messages routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));

@@ -2,7 +2,7 @@ use crate::extractors::current_user::CurrentUser;
 use crate::utils::image_upload::save_image_to_fs;
 use axum::{
     Router,
-    extract::{Json, Query, State, Multipart},
+    extract::{Json, Multipart, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -18,7 +18,10 @@ pub fn businesses_routes(pool: PgPool) -> Router {
         .route("/listBusinesses", get(list_businesses))
         .route("/updateProfile", post(update_business_profile))
         .route("/uploadLogo", post(upload_business_logo))
-        .route("/uploadProfilePicture", post(upload_business_profile_picture))
+        .route(
+            "/uploadProfilePicture",
+            post(upload_business_profile_picture),
+        )
         .route("/uploadCoverPhoto", post(upload_business_cover_photo))
         .with_state(pool.clone())
 }
@@ -251,7 +254,7 @@ pub async fn update_business_profile(
 
     query.push_str(&updates.join(", "));
     query.push_str(&format!("WHERE user_id = ${}", param_index));
-   let user_id = user_id.parse::<i32>().unwrap();
+    let user_id = user_id.parse::<i32>().unwrap();
 
     let mut q = sqlx::query(&query);
     for bind in bindings {
@@ -300,10 +303,7 @@ pub async fn upload_business_logo(
                 ),
             }
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))),
     }
 }
 
@@ -327,7 +327,9 @@ pub async fn upload_business_profile_picture(
             match result {
                 Ok(_) => (
                     StatusCode::OK,
-                    Json(json!({"message": "Profile picture uploaded successfully", "profile_picture": profile_picture_path})),
+                    Json(
+                        json!({"message": "Profile picture uploaded successfully", "profile_picture": profile_picture_path}),
+                    ),
                 ),
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -335,10 +337,7 @@ pub async fn upload_business_profile_picture(
                 ),
             }
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))),
     }
 }
 
@@ -362,7 +361,9 @@ pub async fn upload_business_cover_photo(
             match result {
                 Ok(_) => (
                     StatusCode::OK,
-                    Json(json!({"message": "Cover photo uploaded successfully", "cover_photo": cover_photo_path})),
+                    Json(
+                        json!({"message": "Cover photo uploaded successfully", "cover_photo": cover_photo_path}),
+                    ),
                 ),
                 Err(e) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -370,10 +371,6 @@ pub async fn upload_business_cover_photo(
                 ),
             }
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))),
     }
 }
-

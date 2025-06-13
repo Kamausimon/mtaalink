@@ -3,7 +3,7 @@ use crate::utils::image_upload::save_image_to_fs;
 use axum::{
     Router,
     extract::Query,
-    extract::{Json, State, Multipart},
+    extract::{Json, Multipart, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -256,7 +256,6 @@ pub async fn update_provider_profile(
     query.push_str(&updates.join(", ")); // Join updates with commas
     query.push_str(&format!(" WHERE user_id = ${}", idx)); // Add the user_id condition
     let user_id: i32 = user_id.parse().unwrap(); // Ensure user_id is an i32
-   
 
     let mut q = sqlx::query(&query);
     for b in bindings {
@@ -316,8 +315,6 @@ pub async fn upload_provider_profile_photo(
     }
 }
 
-
-
 pub async fn upload_provider_cover_photo(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
@@ -329,20 +326,22 @@ pub async fn upload_provider_cover_photo(
         Ok(file_name) => {
             let file_url = format!("/uploads/providers/cover_photos/{}", file_name);
 
-            let _ = sqlx::query!("UPDATE providers SET cover_photo = $1 WHERE user_id = $2",
-                file_url, user_id.parse::<i32>().unwrap())
-                .execute(&pool)
-                .await;
-
-            (StatusCode::OK, Json(json!({"message": "Cover photo uploaded successfully", "url": file_url})))
-        }
-        Err(e) => {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
+            let _ = sqlx::query!(
+                "UPDATE providers SET cover_photo = $1 WHERE user_id = $2",
+                file_url,
+                user_id.parse::<i32>().unwrap()
             )
-        },
+            .execute(&pool)
+            .await;
+
+            (
+                StatusCode::OK,
+                Json(json!({"message": "Cover photo uploaded successfully", "url": file_url})),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
     }
 }
-
-

@@ -1,9 +1,12 @@
 use axum::extract::Multipart;
-use uuid::Uuid;
 use std::path::Path;
 use tokio::fs;
+use uuid::Uuid;
 
-pub async fn save_image_to_fs(mut multipart: Multipart, upload_dir: &str) -> Result<String, String> {
+pub async fn save_image_to_fs(
+    mut multipart: Multipart,
+    upload_dir: &str,
+) -> Result<String, String> {
     while let Some(field) = multipart.next_field().await.map_err(|e| e.to_string())? {
         let file_name = field.file_name().ok_or("Missing file name")?.to_string();
         if file_name.is_empty() {
@@ -30,7 +33,9 @@ pub async fn save_image_to_fs(mut multipart: Multipart, upload_dir: &str) -> Res
         println!("File size: {} bytes", data.len());
         // Create the upload directory if it doesn't exist
 
-        fs::create_dir_all(upload_dir).await.map_err(|e| e.to_string())?;
+        fs::create_dir_all(upload_dir)
+            .await
+            .map_err(|e| e.to_string())?;
         fs::write(&path, &data).await.map_err(|e| e.to_string())?;
 
         return Ok(unique_name);
