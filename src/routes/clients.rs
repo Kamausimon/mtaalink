@@ -1,14 +1,14 @@
+use crate::extractors::current_user::CurrentUser;
+use crate::utils::image_upload::save_image_to_fs;
 use axum::{
+    Router,
     extract::{Multipart, State},
+    http::StatusCode,
     response::{IntoResponse, Json},
     routing::post,
-    Router, http::StatusCode,
 };
 use serde_json::json;
 use sqlx::PgPool;
-use crate::extractors::current_user::CurrentUser;
-use crate::utils::image_upload::save_image_to_fs;
-
 
 pub fn client_routes(pool: PgPool) -> Router {
     Router::new()
@@ -16,11 +16,10 @@ pub fn client_routes(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-
 pub async fn uploadProfilePicture(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-   multipart: Multipart,
+    multipart: Multipart,
 ) -> impl IntoResponse {
     // Define the upload directory
     let upload_dir = "uploads/clients/profile_pictures";
@@ -39,7 +38,9 @@ pub async fn uploadProfilePicture(
 
             (
                 StatusCode::OK,
-                Json(json!({ "message": "Profile picture uploaded successfully", "file_name": file_name })),
+                Json(
+                    json!({ "message": "Profile picture uploaded successfully", "file_name": file_name }),
+                ),
             )
         }
         Err(e) => (

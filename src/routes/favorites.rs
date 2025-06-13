@@ -1,16 +1,15 @@
 use crate::extractors::current_user::CurrentUser;
 use axum::{
     Router,
-    extract::{State, Json, Query,Path},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
-use serde_json::json;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::PgPool;
 use validator::Validate;
-
 
 #[derive(Deserialize, Serialize, Debug, Validate)]
 pub struct FavoritePayload {
@@ -18,8 +17,7 @@ pub struct FavoritePayload {
     target_id: i32,
 }
 
-
-pub  fn favorites_routes(pool: PgPool) -> Router {
+pub fn favorites_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/addFavorite", post(add_favorite))
         .route("/getFavorites", get(get_favorites))
@@ -31,8 +29,8 @@ pub async fn add_favorite(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<FavoritePayload>,
-) -> impl IntoResponse  {
-     let target_type = payload.target_type.to_lowercase();
+) -> impl IntoResponse {
+    let target_type = payload.target_type.to_lowercase();
     if !["provider", "business"].contains(&target_type.as_str()) {
         return (
             StatusCode::BAD_REQUEST,
@@ -53,49 +51,60 @@ pub async fn add_favorite(
         user_id.parse::<i32>().unwrap(),
         target_type,
         payload.target_id
-    ).execute(&pool).await;
+    )
+    .execute(&pool)
+    .await;
 
-      match result{
-        Ok(_) => {
-            (StatusCode::OK, Json(json!({ "message": "Favorite added successfully" })))
-        }, 
+    match result {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({ "message": "Favorite added successfully" })),
+        ),
         Err(e) => {
             eprintln!("Error adding favorite: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "message": "Failed to add favorite" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": "Failed to add favorite" })),
+            )
         }
-      }
+    }
 }
 
 pub async fn get_favorites(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
 ) -> impl IntoResponse {
-     let favorites = sqlx::query!(
+    let favorites = sqlx::query!(
         "SELECT target_type, target_id FROM favorites WHERE user_id = $1
         ORDER BY created_at DESC",
         user_id.parse::<i32>().unwrap()
-     ).fetch_all(&pool).await;
+    )
+    .fetch_all(&pool)
+    .await;
 
-     match favorites {
+    match favorites {
         Ok(favs) => {
-            let result: Vec<FavoritePayload> = favs.into_iter()
+            let result: Vec<FavoritePayload> = favs
+                .into_iter()
                 .map(|fav| FavoritePayload {
                     target_type: fav.target_type,
                     target_id: fav.target_id,
                 })
                 .collect();
             (StatusCode::OK, Json(json!({ "favorites": result })))
-        },
-        Err(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "message": "Failed to fetch favorites" })))
         }
-}}
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": "Failed to fetch favorites" })),
+        ),
+    }
+}
 
 pub async fn remove_favorite(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
     CurrentUser { user_id }: CurrentUser,
-)-> impl IntoResponse {
+) -> impl IntoResponse {
     if id <= 0 {
         return (
             StatusCode::BAD_REQUEST,
@@ -107,15 +116,21 @@ pub async fn remove_favorite(
         "DELETE FROM favorites WHERE user_id = $1 AND target_id = $2",
         user_id.parse::<i32>().unwrap(),
         id
-    ).execute(&pool).await;
+    )
+    .execute(&pool)
+    .await;
 
     match result {
-        Ok(_) => {
-            (StatusCode::OK, Json(json!({ "message": "Favorite removed successfully" })))
-        },
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({ "message": "Favorite removed successfully" })),
+        ),
         Err(e) => {
             eprintln!("Error removing favorite: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "message": "Failed to remove favorite" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": "Failed to remove favorite" })),
+            )
         }
     }
 }

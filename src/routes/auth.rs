@@ -7,7 +7,7 @@ use argon2::{
 };
 use axum::{
     Router,
-    extract::{Json, State,Multipart},
+    extract::{Json, Multipart, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -395,4 +395,3 @@ pub async fn reset_password(
         Json(json!({ "message": "Password reset successfully" })),
     )
 }
-
