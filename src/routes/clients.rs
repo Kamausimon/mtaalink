@@ -12,11 +12,11 @@ use sqlx::PgPool;
 
 pub fn client_routes(pool: PgPool) -> Router {
     Router::new()
-        .route("/uploadProfilePicture", post(uploadProfilePicture))
+        .route("/uploadProfilePicture", post(upload_profile_picture))
         .with_state(pool)
 }
 
-pub async fn uploadProfilePicture(
+pub async fn upload_profile_picture(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     multipart: Multipart,

@@ -103,7 +103,10 @@ pub async fn register(
     .await;
 
     match user {
-        Ok(_) => Json(json!({"message": "User registered successfully"})),
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(json!({"message": "User registered successfully"})),
+        ),
         Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
