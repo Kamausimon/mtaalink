@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 pub fn category_routes(pool: PgPool) -> Router {
     Router::new()
-        .route("/categories", get(get_categories))
-        .route("/categories/:id/subcategories", get(get_subcategories_by_category_id))
+        .route("/allCategories", get(get_categories))
+        .route("/allcategories/:id/subcategories", get(get_subcategories_by_category_id))
         .route("/providers/by-category", get(get_providers_by_category)) // expects ?category=1
         .route("/businesses/by-category", get(get_businesses_by_category)) // expects ?category=1
         .with_state(pool)
