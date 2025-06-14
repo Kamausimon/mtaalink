@@ -53,6 +53,7 @@ async fn main() {
         .nest("/reviews", reviews_routes(pool.clone())) // Mount the reviews routes
         .nest("/favorites", favorites_routes(pool.clone())) // Mount the favorites routes
         .nest("/messages", messages_routes(pool.clone())) // Mount the messages routes
+        .nest("/categories", category_routes(pool.clone())) // Mount the categories routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
