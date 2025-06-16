@@ -3,7 +3,7 @@ use axum::{
     extract::{State, Path,Query,Json},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get,post},
 };
 use serde_json::json;
 use sqlx::PgPool;
@@ -15,6 +15,7 @@ pub fn category_routes(pool: PgPool) -> Router {
         .route("/allcategories/:id/subcategories", get(get_subcategories_by_category_id))
         .route("/providers/by-category", get(get_providers_by_category)) // expects ?category=1
         .route("/businesses/by-category", get(get_businesses_by_category)) // expects ?category=1
+        .route("/assignCategories", post(assign_categories))
         .with_state(pool)
 }
 
@@ -242,4 +243,82 @@ pub async fn get_businesses_by_category(
             Json(json!({ "error": format!("Failed to fetch businesses: {}", e) })),
         ),
     }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CategoryAssignment{
+    target_id: i32,
+    target_type: String, // "provider" or "business"
+    category_ids: Vec<i32>,
+}
+
+pub async fn assign_categories(
+    State(pool): State<PgPool>,
+    Json(payload): Json<CategoryAssignment>,
+)->impl IntoResponse {
+    let target_id = payload.target_id;
+    let target_type = payload.target_type.to_lowercase();
+
+    if target_type != "provider" && target_type != "business" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid target type. Must be 'provider' or 'business'." })),
+        );
+    }
+
+    if payload.category_ids.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No category IDs provided." })),
+        );
+    }
+
+    if target_id <= 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid target ID." })),
+        );
+    }
+
+    let delete_query = match target_type.as_str() {
+        "provider" => "DELETE FROM provider_categories WHERE provider_id = $1",
+        "business" => "DELETE FROM business_categories WHERE business_id = $1",
+        _ => return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Unexpected error occurred." })),
+        ),
+    };
+
+    if let Err(e) = sqlx::query(delete_query)
+    .bind(payload.target_id)
+    .execute(&pool)
+    .await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to delete existing categories: {}", e) })),
+        );
+    }
+
+    let insert_query = match target_type.as_str() {
+        "provider" => "INSERT INTO provider_categories (provider_id, category_id) VALUES ($1, $2)",
+        "business" => "INSERT INTO business_categories (business_id, category_id) VALUES ($1, $2)",
+        _ => return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Unexpected error occurred." })),
+        ),
+    };
+
+    for &cat_id in &payload.category_ids {
+        if let Err(e) = sqlx::query(insert_query)
+            .bind(target_id)
+            .bind(cat_id)
+            .execute(&pool)
+            .await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to assign category {}: {}", cat_id, e) })),
+            );
+        }
+    };
+    (StatusCode::OK, Json(json!({ "message": "Categories assigned successfully." })))
 }

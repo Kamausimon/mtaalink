@@ -19,6 +19,7 @@ pub fn reviews_routes(pool: PgPool) -> Router {
         .route("/rankProviders", get(rank_providers))
         .route("/rankBusinesses", get(rank_businesses))
         .route("/getReviewAggById", get(get_review_agg_by_id))
+        // .route("/:id/replyReview", post(reply_review)) // This can be used to reply to a review
         .with_state(pool)
 }
 
@@ -320,3 +321,46 @@ pub async fn get_review_agg_by_id(
         ),
     }
 }
+
+// pub struct ReplyReview {
+//     comment: String,
+// }
+
+// //allow provider or business to reply to a review
+
+// pub async fn reply_review(
+//     State(pool): State<PgPool>,
+//     CurrentUser { user_id }: CurrentUser,
+//     Json(payload): Json<ReplyReview>,
+// ) -> impl IntoResponse {
+//     // Validate the payload
+//     if payload.comment.is_empty() {
+//         return (
+//             StatusCode::BAD_REQUEST,
+//             Json(json!({ "message": "Reply comment cannot be empty" })),
+//         );
+//     }
+
+//     // Get the user ID
+//     let user_id = user_id.parse::<i32>().unwrap_or(0);
+
+//     // Insert the reply into the database
+//     let result = sqlx::query!(
+//         "INSERT INTO review_replies (reviewer_id, comment) VALUES ($1, $2) RETURNING id",
+//         user_id,
+//         payload.comment
+//     )
+//     .fetch_one(&pool)
+//     .await;
+
+//     match result {
+//         Ok(record) => (
+//             StatusCode::CREATED,
+//             Json(json!({ "message": "Reply created successfully", "reply_id": record.id })),
+//         ),
+//         Err(e) => (
+//             StatusCode::INTERNAL_SERVER_ERROR,
+//             Json(json!({ "message": format!("Failed to create reply: {}", e) })),
+//         ),
+//     }
+// }
