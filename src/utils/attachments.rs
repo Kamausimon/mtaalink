@@ -85,3 +85,36 @@ pub asyn fn upload_attachments(
 }
 
 
+//retrieve the attchments uploaded by  provider or business
+#[derive(Deserialize, Serialize)]
+pub struct AttachmentQuery {
+    pub target_type: String,
+    pub target_id: i32,
+}
+
+
+pub async fn get_attachments(
+    State(pool): State<PgPool>,
+    Query(params): Query<AttachmentQuery>,
+) -> impl IntoResponse {
+    let target_type = params.target_type;
+    let target_id = params.target_id;
+
+    let attachments = sqlx::query!(
+        "SELECT * FROM attachments WHERE target_type = $1 AND target_id = $2",
+        target_type,
+        target_id
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if attachments.is_empty() {
+        return (StatusCode::NOT_FOUND, Json(json!({"message": "No attachments found"}))).into_response();
+    }
+
+    (StatusCode::OK, Json(attachments)).into_response()
+}
+
+
+
