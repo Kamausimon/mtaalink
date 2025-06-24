@@ -11,7 +11,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use sqlx::QueryBuilder;
 use validator::Validate;
 
 pub fn service_providers_routes(pool: PgPool) -> Router {
