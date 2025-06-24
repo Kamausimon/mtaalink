@@ -1,16 +1,16 @@
 use axum::{
-    extract::{State, Query, Json, },
+    extract::{State, Json, },
     response::IntoResponse,
     http::StatusCode,
     Router,
-    routing::{get, post}
+    routing::{get, post},
 };
 use serde_json::json;
 use sqlx::PgPool;
-use serde;:{Deserialize, Serialize};
-use validate::Validate;
+use serde::{Deserialize, Serialize};
+use validator::Validate;
 use crate::extractors::administrator::require_admin;
-use crate::extractors::current_user::CurrentUser;
+
 
 pub fn admin_routes(pool: PgPool)-> Router {
     Router::new()
@@ -20,15 +20,15 @@ pub fn admin_routes(pool: PgPool)-> Router {
         .route("/delete_category", post(delete_category)) //done
         .route("/users", get(get_users)) //done
         .route("/delete_user", post(delete_user)) //done
-        .route("/userAnalytics", get(get_user_analytics)) //done
-        .route("/flagContent", post(flag_content))
-        .route("/resolveFlag", post(resolve_flag))
-        .route("/moderateReviews", get(moderate_reviews))
-        .layer(axum::middleware::from_fn(require_admin))
+        // .route("/userAnalytics", get(get_user_analytics)) 
+        // .route("/flagContent", post(flag_content))
+        // .route("/resolveFlag", post(resolve_flag))
+        // .route("/moderateReviews", get(moderate_reviews))
+        .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
 }
 
-#derive[Debug, Serialize, Deserialize, sqlx::FromRow]
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct CategoryWithParent{
     pub id: i32,
     pub category_name: String,
@@ -36,7 +36,7 @@ pub struct CategoryWithParent{
     pub parent_name: Option<String>,
 }
 
-pub async fn get _categories(
+pub async fn get_categories(
     State(pool): State<PgPool>,
 ) -> impl IntoResponse {
     let categories = sqlx::query_as!(CategoryWithParent,
@@ -65,7 +65,7 @@ pub async fn get _categories(
 
 //create a new catergory as admin
 #[derive(Deserialize, Serialize,Validate)]
-pub struct newCategory{
+pub struct NewCategory{
     #[validate(length(min = 1, max = 100))]
     pub name: String,
     pub parent_id: Option<i32>,
@@ -73,10 +73,10 @@ pub struct newCategory{
 
 pub async fn create_category(
     State(pool) : State<PgPool>,
-    Json(payload): Json<newCategory>,
+    Json(payload): Json<NewCategory>,
 )-> impl IntoResponse {
   //validate payload 
-  if Err(e) = payload.validate(){
+  if let Err(e) = payload.validate(){
     return( StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() })));
   }
 
@@ -100,6 +100,7 @@ pub async fn create_category(
 }
 
 //create a new parent category as admin
+#[derive(Deserialize, Serialize, Validate, Debug, sqlx::FromRow)]
 pub struct NewParentCategory{
     subcategory_name: String,
     parent_category_name: String,
@@ -109,33 +110,32 @@ pub async fn create_parent_category(
     State(pool) : State<PgPool>,
     Json(payload) : Json<NewParentCategory>
 )-> impl IntoResponse{
- let mut tx = match pool.begin().await{
-    Ok(t)=> t,
-    Err(_)=> {
-        eprintln!("There was an error");
-        (StatusCode::INTERNAL_SERVER_ERROR, 
-         Json(json!({
-        "message": "There was an error starting the transation"
-         })))
+   let mut tx = match pool.begin().await {
+    Ok(t) => t,
+    Err(_) => {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": "There was an error starting the transaction" }))
+        );
     }
+};
 
- }
     //check if the parent category exists first
     let parent = sqlx::query!(
         "SELECT id FROM categories WHERE name = $1 AND id IS NULL",
         payload.parent_category_name
-    ).fetch_optional(&mut *tx)
+    ).fetch_optional(&mut *tx);
 
     //if the parent does not exist continue and create
-let parent id = match parent {
+let parent_id = match parent.await {
     Ok(Some(record))=> record.id, // Parent category exists
     //if the parent does not exist, create it
     Ok(None) => {
         let new_parent  =sqlx::query!(
-            "INSERT INTO categories (name, parent_id,) VALUES ($1, NULL) RETURNING id",
+            "INSERT INTO categories (name, parent_id) VALUES ($1, NULL) RETURNING id",
             payload.parent_category_name
-        ).fetch_one(&mut *tx).await.expect("Failed to create parent category")
-        new_parent.id;    
+        ).fetch_one(&mut *tx).await.expect("Failed to create parent category");
+        new_parent.id   
      },
      Err(e)=> {
         eprintln!("Failed to check parent category: {}", e);
@@ -167,7 +167,9 @@ match subcategory {
 }
 
 }
-pubs struct DeleteCategoryParams {
+
+#[derive(Deserialize, Debug)]
+pub struct DeleteCategoryParams {
     pub category_id: i32,
 }
 
@@ -200,8 +202,8 @@ pub struct User {
 pub async fn get_users(
     State(pool): State<PgPool>,
 ) -> impl IntoResponse {
-    let users = sqlx::query_as!(User,
-        "SELECT id, username, email, role FROM users"
+    let users = sqlx::query_as::<_, User>(
+        "SELECT id, username, email, role FROM users ORDER BY created_at DESC"
     )
     .fetch_all(&pool)
     .await;
@@ -235,27 +237,12 @@ pub async fn delete_user(
     }
 }
 
-#derive(Deserialize, Serialize, sqlx::FromRow, Debug)]
-pub struct UserAnalytics {
-    pub user_id: i32,
-    pub total_posts: i64,
-    pub total_reviews: i64,
-}  
+//todo: implement user analytics, flag content, resolve flag, moderate reviews
 
-pub async fn get_user_analytics(
-    State(pool): State<PgPool>,
-) -> impl IntoResponse {
-    let analytics = sqlx::query_as!(UserAnalytics,
-        "SELECT user_id, COUNT(*) AS total_posts, SUM(CASE WHEN review IS NOT NULL THEN 1 ELSE 0 END) AS total_reviews FROM posts GROUP BY user_id"
-    )
-    .fetch_all(&pool)
-    .await;
 
-    match analytics {
-        Ok(analytics) => (StatusCode::OK, Json(json!({ "user_analytics": analytics }))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Failed to fetch user analytics: {}", e) }))),
-    }
-}
+
+
+
 
 
 
