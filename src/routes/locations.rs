@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use serde_json::json;
 use chrono::NaiveDateTime;
-use validate::Validate;
+use validator::Validate;
 use chrono::NaiveDateTime;
 use crate::extractors::current_user::CurrentUser;
 
