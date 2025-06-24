@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Json, Path, Query, State},
+    extract::{Json, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -93,6 +93,10 @@ pub async fn send_message(
             &target_type,
             payload.target_id
         ).execute(&pool).await;
+
+        if interaction.is_err() {
+            eprintln!("Failed to log interaction: {}", interaction.unwrap_err());
+        }
     }
 
    
