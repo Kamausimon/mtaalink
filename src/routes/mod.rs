@@ -8,4 +8,4 @@ pub mod reviews;
 pub mod service_providers;
 pub mod categories;
 pub mod bookings;
-pub mod attachments;
+pub mod admin;
