@@ -1,7 +1,7 @@
 use crate::extractors::current_user::CurrentUser;
 use axum::{
     Router,
-    extract::{Json, Path, Query, State},
+    extract::{Json, Path,  State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -95,7 +95,7 @@ pub async fn get_favorites(
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": "Failed to fetch favorites" })),
+            Json(json!({ "message": "Failed to fetch favorites", "error": e.to_string() })),
         ),
     }
 }
