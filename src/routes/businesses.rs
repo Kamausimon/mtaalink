@@ -97,7 +97,7 @@ pub async fn onboard_business(
     match result {
         Ok(record) => (
             StatusCode::CREATED,
-            Json(json!({ "message": "Business onboarded successfully"})),
+            Json(json!({ "message": "Business onboarded successfully", "business_id": record.id })),
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
