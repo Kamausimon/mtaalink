@@ -124,8 +124,7 @@ pub async fn get_attachments(
     SerializableAttachment,
     "SELECT id, file_name, file_path, file_type, post_id, target_type, target_id, created_at FROM attachments WHERE target_type = $1 AND target_id = $2",
     target_type,
-    target_id,   
-  ).fetch_all(&pool).await;
+    target_id).fetch_all(&pool).await;
 
     match attachments {
         Ok(rows) => {
