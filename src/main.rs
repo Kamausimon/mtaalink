@@ -22,9 +22,10 @@ use routes::messages::messages_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
 use routes::categories::category_routes;
-use routes::bookings::bookings_routes;
+use routes::bookings::booking_routes;
 use routes::admin::admin_routes;
 use utils::attachments::attachments_routes;
+
 
 #[tokio::main]
 async fn main() {
@@ -57,7 +58,7 @@ async fn main() {
         .nest("/favorites", favorites_routes(pool.clone())) // Mount the favorites routes
         .nest("/messages", messages_routes(pool.clone())) // Mount the messages routes
         .nest("/categories", category_routes(pool.clone())) // Mount the categories routes
-        .nest("/bookings", bookings_routes(pool.clone())) // Mount the bookings routes
+        .nest("/bookings", booking_routes(pool.clone())) // Mount the bookings routes
         .nest("/admin", admin_routes(pool.clone())) // Mount the admin routes
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
