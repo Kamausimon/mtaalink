@@ -14,7 +14,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::{PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
 

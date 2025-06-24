@@ -1,37 +1,38 @@
 use axum::{
     Router,
-    extract::{State, Path,Query,Json},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get,post},
+    routing::{get, post},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use serde::{Deserialize, Serialize};
 
 pub fn category_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/allCategories", get(get_categories))
-        .route("/allcategories/:id/subcategories", get(get_subcategories_by_category_id))
+        .route(
+            "/allcategories/:id/subcategories",
+            get(get_subcategories_by_category_id),
+        )
         .route("/providers/by-category", get(get_providers_by_category)) // expects ?category=1
         .route("/businesses/by-category", get(get_businesses_by_category)) // expects ?category=1
         .route("/assignCategories", post(assign_categories))
         .with_state(pool)
 }
 
-
 #[derive(Serialize, Deserialize, sqlx::FromRow, Debug)]
-pub struct CategoryWithParent{
+pub struct CategoryWithParent {
     pub id: i32,
     pub category_name: String,
     pub parent_id: Option<i32>,
     pub parent_name: Option<String>,
 }
-pub async fn get_categories(
-    State(pool): State<PgPool>,
-) -> impl IntoResponse {
-     let categories = sqlx::query_as!(CategoryWithParent,
-          r#"
+pub async fn get_categories(State(pool): State<PgPool>) -> impl IntoResponse {
+    let categories = sqlx::query_as!(
+        CategoryWithParent,
+        r#"
     SELECT 
         c.id,
         c.name AS category_name,
@@ -42,23 +43,23 @@ pub async fn get_categories(
     LEFT JOIN 
         categories p ON c.parent_id = p.id
     "#
-     ).fetch_all(&pool).await;
+    )
+    .fetch_all(&pool)
+    .await;
 
     match categories {
-        Ok(categories) => {
-            (StatusCode::OK, Json(json!({ "categories": categories })))
-        }
-        Err(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Failed to fetch categories: {}", e) })))
-        }
-       
-}}
-    
+        Ok(categories) => (StatusCode::OK, Json(json!({ "categories": categories }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to fetch categories: {}", e) })),
+        ),
+    }
+}
 
 #[derive(Serialize, Deserialize, sqlx::FromRow, Debug)]
 pub struct Subcategory {
     pub id: i32,
-    pub name: String, 
+    pub name: String,
 }
 
 #[derive(Deserialize, Serialize, sqlx::FromRow)]
@@ -71,15 +72,17 @@ pub async fn get_subcategories_by_category_id(
     Path(parent_id): Path<i32>,
     State(pool): State<PgPool>,
 ) -> impl IntoResponse {
-    let result = sqlx::query_as::<_, Category>(
-        "SELECT id, name FROM categories WHERE parent_id = $1"
-    )
-    .bind(parent_id)
-    .fetch_all(&pool)
-    .await;
+    let result =
+        sqlx::query_as::<_, Category>("SELECT id, name FROM categories WHERE parent_id = $1")
+            .bind(parent_id)
+            .fetch_all(&pool)
+            .await;
 
     match result {
-        Ok(subcategories) => (StatusCode::OK, Json(json!({ "subcategories": subcategories }))),
+        Ok(subcategories) => (
+            StatusCode::OK,
+            Json(json!({ "subcategories": subcategories })),
+        ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "message": format!("Failed to fetch subcategories: {}", e) })),
@@ -102,8 +105,6 @@ pub struct ProviderWQueryResponse {
     pub subcategory: Option<i32>,
 }
 
-
-
 pub async fn get_providers_by_category(
     State(pool): State<PgPool>,
     Query(params): Query<ProviderWQueryResponse>,
@@ -125,7 +126,8 @@ pub async fn get_providers_by_category(
         LEFT JOIN 
             categories parent ON sub.parent_id = parent.id
         WHERE 1=1
-    "#.to_string();
+    "#
+    .to_string();
 
     if let Some(_) = category {
         base_query.push_str(" AND parent.id = $1");
@@ -203,7 +205,8 @@ pub async fn get_businesses_by_category(
         LEFT JOIN 
             categories parent ON sub.parent_id = parent.id
         WHERE 1=1
-    "#.to_string();
+    "#
+    .to_string();
 
     if let Some(_) = category {
         base_query.push_str(" AND parent.id = $1");
@@ -246,7 +249,7 @@ pub async fn get_businesses_by_category(
 }
 
 #[derive(Deserialize, Debug)]
-pub struct CategoryAssignment{
+pub struct CategoryAssignment {
     target_id: i32,
     target_type: String, // "provider" or "business"
     category_ids: Vec<i32>,
@@ -255,7 +258,7 @@ pub struct CategoryAssignment{
 pub async fn assign_categories(
     State(pool): State<PgPool>,
     Json(payload): Json<CategoryAssignment>,
-)->impl IntoResponse {
+) -> impl IntoResponse {
     let target_id = payload.target_id;
     let target_type = payload.target_type.to_lowercase();
 
@@ -283,16 +286,19 @@ pub async fn assign_categories(
     let delete_query = match target_type.as_str() {
         "provider" => "DELETE FROM provider_categories WHERE provider_id = $1",
         "business" => "DELETE FROM business_categories WHERE business_id = $1",
-        _ => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "Unexpected error occurred." })),
-        ),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Unexpected error occurred." })),
+            );
+        }
     };
 
     if let Err(e) = sqlx::query(delete_query)
-    .bind(payload.target_id)
-    .execute(&pool)
-    .await {
+        .bind(payload.target_id)
+        .execute(&pool)
+        .await
+    {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("Failed to delete existing categories: {}", e) })),
@@ -302,10 +308,12 @@ pub async fn assign_categories(
     let insert_query = match target_type.as_str() {
         "provider" => "INSERT INTO provider_categories (provider_id, category_id) VALUES ($1, $2)",
         "business" => "INSERT INTO business_categories (business_id, category_id) VALUES ($1, $2)",
-        _ => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "Unexpected error occurred." })),
-        ),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Unexpected error occurred." })),
+            );
+        }
     };
 
     for &cat_id in &payload.category_ids {
@@ -313,12 +321,16 @@ pub async fn assign_categories(
             .bind(target_id)
             .bind(cat_id)
             .execute(&pool)
-            .await {
+            .await
+        {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("Failed to assign category {}: {}", cat_id, e) })),
             );
         }
-    };
-    (StatusCode::OK, Json(json!({ "message": "Categories assigned successfully." })))
+    }
+    (
+        StatusCode::OK,
+        Json(json!({ "message": "Categories assigned successfully." })),
+    )
 }

@@ -1,23 +1,22 @@
+use crate::extractors::current_user::CurrentUser;
 use axum::{
     Router,
-    extract::{Path, Query,State, Json},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
+use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use serde::{Deserialize, Serialize};
-use chrono::NaiveDateTime;
-use crate::extractors::current_user::CurrentUser;
-
 
 pub fn booking_routes(pool: PgPool) -> Router {
     Router::new()
-       .route("/createBooking", post(create_booking))
-       .route("/getBookings/me", get(get_bookings_client))
-       .route("/getBookings/received", get(get_bookings_received)) //can be used by both businesses and providers
-        .route("/:id", get(get_booking_by_id)) 
+        .route("/createBooking", post(create_booking))
+        .route("/getBookings/me", get(get_bookings_client))
+        .route("/getBookings/received", get(get_bookings_received)) //can be used by both businesses and providers
+        .route("/:id", get(get_booking_by_id))
         .route("/:id/status", post(update_booking)) //used to update the status of a booking to accepted, rejected, or completed
         .route("/:id/delete", post(delete_booking)) //used to delete a booking
         .route("/:id/reschedule", post(reschedule_booking)) //used to reschedule a booking
@@ -28,10 +27,10 @@ pub fn booking_routes(pool: PgPool) -> Router {
 pub struct Booking {
     pub id: i32,
     pub client_id: i32,
-     pub target_type: String, // e.g., "business", "provider"
-    pub target_id: i32, // e.g., business_id or provider_id
-    pub branch_id: Option<i32>, // e.g., branch_id if applicable
-    pub service_description: String, // e.g., "haircut", "plumbing service"
+    pub target_type: String,                   // e.g., "business", "provider"
+    pub target_id: i32,                        // e.g., business_id or provider_id
+    pub branch_id: Option<i32>,                // e.g., branch_id if applicable
+    pub service_description: String,           // e.g., "haircut", "plumbing service"
     pub scheduled_time: chrono::NaiveDateTime, // e.g., "2023-10-01 14:00:00"
     pub status: String, // e.g., "pending", "confirmed", "cancelled", "completed"
 }
@@ -44,7 +43,10 @@ pub async fn create_booking(
     let target_type = payload.target_type.to_lowercase();
 
     if target_type != "business" && target_type != "provider" {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid target type"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid target type"})),
+        );
     }
 
     let user_id = user_id.parse::<i32>().unwrap_or(0);
@@ -54,11 +56,17 @@ pub async fn create_booking(
     let scheduled_time = payload.scheduled_time;
 
     if target_id <= 0 {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid target ID"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid target ID"})),
+        );
     }
 
     if scheduled_time < chrono::Local::now().naive_local() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Scheduled time cannot be in the past"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Scheduled time cannot be in the past"})),
+        );
     }
 
     let result = sqlx::query!(
@@ -79,62 +87,75 @@ pub async fn create_booking(
     .await;
 
     match result {
-        Ok(record) => {
-            (StatusCode::CREATED, Json(json!({
+        Ok(record) => (
+            StatusCode::CREATED,
+            Json(json!({
                 "message": "Booking created successfully",
                 "booking_id": record.id
-            })))
-        },
+            })),
+        ),
         Err(e) => {
             eprintln!("Error creating booking: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create booking"})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create booking"})),
+            )
         }
     }
 }
 
 #[derive(Serialize, Deserialize, sqlx::FromRow)]
-pub struct BookingQuery{
+pub struct BookingQuery {
     pub status: Option<String>,
     pub target_type: Option<String>,
 }
 
 pub async fn get_bookings_client(
-    State(pool) : State<PgPool>,
+    State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Query(params) : Query<BookingQuery>
-)-> impl IntoResponse {
-   let user_id = user_id.parse::<i32>().unwrap_or(0);
+    Query(params): Query<BookingQuery>,
+) -> impl IntoResponse {
+    let user_id = user_id.parse::<i32>().unwrap_or(0);
 
-    let mut sql =String::from("SELECT * FROM bookings WHERE client_id = $1");
+    let mut sql = String::from("SELECT * FROM bookings WHERE client_id = $1");
 
-    if let Some(ref status) = params.status{
+    if let Some(ref status) = params.status {
         sql.push_str(" AND status = ");
         sql.push_str(&format!("{}", status));
     }
 
-    if let Some(ref target_type)  = params.target_type{
+    if let Some(ref target_type) = params.target_type {
         sql.push_str(" AND target_type = ");
-        sql.push_str(&format!("{}",target_type));
+        sql.push_str(&format!("{}", target_type));
     }
 
     sql.push_str(" ORDER BY scheduled_time DESC");
 
-    let bookings = sqlx::query_as::<_, Booking>(&sql).bind(user_id).fetch_all(&pool).await;
-    
-    match bookings{
-        Ok(bookings) => (StatusCode::OK,Json(json!({"all the related bookings": bookings})) ),
+    let bookings = sqlx::query_as::<_, Booking>(&sql)
+        .bind(user_id)
+        .fetch_all(&pool)
+        .await;
+
+    match bookings {
+        Ok(bookings) => (
+            StatusCode::OK,
+            Json(json!({"all the related bookings": bookings})),
+        ),
         Err(e) => {
             eprintln!("error fetching bookings {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!("There was an error fetching the results")))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!("There was an error fetching the results")),
+            )
         }
     }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct BookingsQueryByReceiver{
+pub struct BookingsQueryByReceiver {
     target_type: String, //can be provider or business
     target_id: i32,
-    status: String //can be pending, confirmed, cancelled or completed
+    status: String, //can be pending, confirmed, cancelled or completed
 }
 
 pub async fn get_bookings_received(
@@ -185,16 +206,15 @@ pub async fn get_bookings_received(
     }
 }
 
-#[derive(Deserialize, Serialize, Debug,sqlx::FromRow)]
+#[derive(Deserialize, Serialize, Debug, sqlx::FromRow)]
 pub struct BookingByIdQuery {
     pub id: i32,
 }
 
-
 pub async fn get_booking_by_id(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Path(id): Path<i32>,  
+    Path(id): Path<i32>,
 ) -> impl IntoResponse {
     if id <= 0 {
         return (
@@ -203,20 +223,15 @@ pub async fn get_booking_by_id(
         );
     }
 
- let result = sqlx::query_as::<_, Booking>(
-    "SELECT * FROM bookings WHERE client_id = $1 AND id = $2"
-)
-.bind(user_id.parse::<i32>().unwrap_or(0))
-.bind(id)
-.fetch_one(&pool)
-.await;
-
+    let result =
+        sqlx::query_as::<_, Booking>("SELECT * FROM bookings WHERE client_id = $1 AND id = $2")
+            .bind(user_id.parse::<i32>().unwrap_or(0))
+            .bind(id)
+            .fetch_one(&pool)
+            .await;
 
     match result {
-        Ok(booking) => (
-            StatusCode::OK,
-            Json(json!({ "booking": booking })),
-        ),
+        Ok(booking) => (StatusCode::OK, Json(json!({ "booking": booking }))),
         Err(e) => {
             eprintln!("There was an error getting the booking: {}", e);
             (
@@ -227,20 +242,16 @@ pub async fn get_booking_by_id(
     }
 }
 
-
-
 #[derive(Deserialize, Serialize, Debug)]
-pub struct BookingUpdate{
-    status: String
+pub struct BookingUpdate {
+    status: String,
 }
-
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct UpdateQuery {
     target_id: i32,
     target_type: String,
 }
-
 
 pub async fn update_booking(
     State(pool): State<PgPool>,
@@ -298,13 +309,11 @@ pub async fn update_booking(
     }
 }
 
-
 pub async fn delete_booking(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
     CurrentUser { user_id }: CurrentUser,
-) -> impl IntoResponse 
-{
+) -> impl IntoResponse {
     if id <= 0 {
         return (
             StatusCode::BAD_REQUEST,
@@ -337,17 +346,17 @@ pub async fn delete_booking(
     }
 }
 
-#[derive(Deserialize, Serialize, Debug,sqlx::FromRow)]
+#[derive(Deserialize, Serialize, Debug, sqlx::FromRow)]
 pub struct ReschedulePayload {
     pub scheduled_time: NaiveDateTime, // e.g., "2023-10-01 15:00:00"
 }
 
 pub async fn reschedule_booking(
     State(pool): State<PgPool>,
-      Path(id): Path<i32>,
-      CurrentUser { user_id }: CurrentUser,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<ReschedulePayload>,
-)-> impl IntoResponse{
+) -> impl IntoResponse {
     if id <= 0 {
         return (
             StatusCode::BAD_REQUEST,

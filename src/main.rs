@@ -13,19 +13,18 @@ mod extractors;
 mod routes;
 mod utils;
 
+use routes::admin::admin_routes;
 use routes::auth::auth_routes;
+use routes::bookings::booking_routes;
 use routes::businesses::businesses_routes;
+use routes::categories::category_routes;
 use routes::clients::client_routes;
 use routes::dashboard::dashboard;
 use routes::favorites::favorites_routes;
 use routes::messages::messages_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
-use routes::categories::category_routes;
-use routes::bookings::booking_routes;
-use routes::admin::admin_routes;
 use utils::attachments::attachments_routes;
-
 
 #[tokio::main]
 async fn main() {

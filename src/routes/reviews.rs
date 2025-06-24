@@ -140,25 +140,29 @@ pub async fn create_reviews(
         reviewer_id,
         target_type,
         target_id
-    ).fetch_optional(&pool).await;
+    )
+    .fetch_optional(&pool)
+    .await;
 
-match interaction_exists {
-    Ok(Some(_)) => {
-        // Interaction exists, proceed with review creation
+    match interaction_exists {
+        Ok(Some(_)) => {
+            // Interaction exists, proceed with review creation
+        }
+        Ok(None) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(
+                    json!({ "message": "You can only review service providers or businesses you have interacted with" }),
+                ),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": format!("Failed to check interactions: {}", e) })),
+            );
+        }
     }
-    Ok(None) => {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "message": "You can only review service providers or businesses you have interacted with" })),
-        );
-    }
-    Err(e) => {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": format!("Failed to check interactions: {}", e) })),
-        );
-    }
-}
 
     let insert_review = sqlx::query!(
         "INSERT INTO reviews (reviewer_id, target_type, target_id, rating, comment)
