@@ -307,20 +307,14 @@ pub async fn get_review_agg_by_id(
 
     match result {
         Ok(data) => (StatusCode::OK, Json(json!({ "aggregated_rating": data }))),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "aggregated_rating" : {
-                "target_id": params.target_id,
-                "average_rating": 0.0,
-                "review_count": 0
-            }})),
-        ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "message": format!("Failed to fetch aggregated rating: {}", e) })),
         ),
     }
 }
+
+//todo
 
 // pub struct ReplyReview {
 //     comment: String,
