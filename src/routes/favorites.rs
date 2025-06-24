@@ -1,7 +1,7 @@
 use crate::extractors::current_user::CurrentUser;
 use axum::{
     Router,
-    extract::{Json, Path,  State},
+    extract::{Json, Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},

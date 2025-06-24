@@ -1,11 +1,11 @@
+pub mod admin;
 pub mod auth;
+pub mod bookings;
 pub mod businesses;
+pub mod categories;
 pub mod clients;
 pub mod dashboard;
 pub mod favorites;
 pub mod messages;
 pub mod reviews;
 pub mod service_providers;
-pub mod categories;
-pub mod bookings;
-pub mod admin;

@@ -85,21 +85,21 @@ pub async fn send_message(
 .fetch_one(&pool)
 .await;
 
-    if result.is_ok(){
+    if result.is_ok() {
         let interaction = sqlx::query!(
             "INSERT INTO interactions (user_id, target_type, target_id, interaction_type)
              VALUES ($1, $2, $3, 'message')",
             user_id.parse::<i32>().unwrap(),
             &target_type,
             payload.target_id
-        ).execute(&pool).await;
+        )
+        .execute(&pool)
+        .await;
 
         if interaction.is_err() {
             eprintln!("Failed to log interaction: {}", interaction.unwrap_err());
         }
     }
-
-   
 
     match result {
         Ok(message) => (StatusCode::CREATED, Json(json!({ "message": message }))),
@@ -108,7 +108,6 @@ pub async fn send_message(
             Json(json!({ "message": format!("Failed to send message: {}", e) })),
         ),
     }
-
 }
 
 // get messages
@@ -261,7 +260,7 @@ pub async fn mark_messages_as_read(
 
     let user_id = user_id.parse::<i32>().unwrap();
     let target_type = payload.target_type.to_lowercase();
-   
+
     let receiver_id = match get_target_id(&pool, user_id, &target_type).await {
         Ok(id) => id,
         Err(_) => {
@@ -271,7 +270,6 @@ pub async fn mark_messages_as_read(
             );
         }
     };
-
 
     let result = sqlx::query!(
         "UPDATE messages
@@ -311,9 +309,7 @@ pub async fn get_unread_messages_count(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Query(params): Query<UnreadMessagesCount>,
-    
 ) -> impl IntoResponse {
-   
     let target_type = params.target_type.to_lowercase();
     let user_id = user_id.parse::<i32>().unwrap();
     println!("Current user ID: {}", user_id);
@@ -325,9 +321,9 @@ pub async fn get_unread_messages_count(
                 Json(json!({ "message": "You are not allowed to view these messages" })),
             );
         }
-    }; 
+    };
     println!("Receiver ID: {}", receiver_id);
-    
+
     let count = sqlx::query!(
         "SELECT COUNT(*) as count FROM messages WHERE receiver_id = $1 AND is_read = FALSE",
         receiver_id
