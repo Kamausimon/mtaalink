@@ -1,5 +1,4 @@
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::image_upload::save_image_to_fs;
 use crate::utils::jwt::create_jwt;
 use argon2::{
     Argon2, PasswordVerifier,
@@ -7,7 +6,7 @@ use argon2::{
 };
 use axum::{
     Router,
-    extract::{Json, Multipart, State},
+    extract::{Json, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -15,7 +14,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::{PgPool, query};
+use sqlx::{PgPool};
 use uuid::Uuid;
 use validator::Validate;
 
