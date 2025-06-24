@@ -17,11 +17,11 @@ pub fn posts_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/createPosts", post(create_posts))
         .route("/getAllPosts", get(get_All_posts)) //public feed
-        // .route("/getPost/:id", get(get_post_by_id))
-        // .route("/provider/:id/posts", get(get_posts_by_provider_id))
-        // .route("/business/:id/posts", get(get_posts_by_business_id))
-        // .route("/deletePost/:id", post(delete_post))
-        // .route("/updatePost/:id", post(update_post))
+        .route("/getPost/:id", get(get_post_by_id))
+        .route("/provider/:id/posts", get(get_posts_by_provider_id))
+        .route("/business/:id/posts", get(get_posts_by_business_id))
+        .route("/deletePost/:id", post(delete_post))
+        .route("/updatePost/:id", post(update_post_and_attachments))
         .with_state(pool)
 }
 
@@ -115,3 +115,177 @@ pub async fn get_All_posts(
 }
 
 //todo implement get_post_by_id, get_posts_by_provider_id, get_posts_by_business_id, delete_post, update_post
+#[derive(Deserialize, Serialize, sqlx::FromRow)]
+pub struct Post{
+    pub id: i32,
+    pub title: String,
+    pub content: String,
+    pub business_id: i32,
+    pub provider_id: i32,
+    pub created_by: i32,
+    pub created_at: NaiveDateTime,
+}
+
+pub async fn get_post_by_id(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+) -> impl IntoResponse {
+    let post = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await;
+
+    match post {
+        Ok(post) => (StatusCode::OK, Json(json!("post": post))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch post: {}", e)}))).into_response(),
+    }
+}
+
+//get posts by provider id
+#[derive(Deserialize, Serialize)]
+pub struct ProviderPostsQuery {
+    pub provider_id: i32,
+}
+
+pub async fn get_posts_by_provider_id(
+    State(pool): State<PgPool>,
+    Path(provider_id): Path<i32>,
+) -> impl IntoResponse {
+    let posts = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE provider_id = $1")
+        .bind(provider_id)
+        .fetch_all(&pool)
+        .await;
+
+    match posts {
+        Ok(posts) => (StatusCode::OK, Json(json!({"posts": posts}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch posts: {}", e)}))).into_response(),
+    }
+}
+
+//get posts by business id
+pub struct BusinessPostsQuery {
+    pub business_id: i32,
+}
+
+
+pub async fn get_posts_by_business_id(
+    State(pool): State<PgPool>,
+    Path(business_id): Path<i32>,
+) -> impl IntoResponse {
+    let posts = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE business_id = $1")
+        .bind(business_id)
+        .fetch_all(&pool)
+        .await;
+
+    match posts {
+        Ok(posts) => (StatusCode::OK, Json(json!({"posts": posts}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch posts: {}", e)}))).into_response(),
+    }
+}
+
+//delete post by id
+pub async fn delete_post(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+) -> impl IntoResponse {
+    let result = sqlx::query!("DELETE FROM posts WHERE id = $1", id)
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Post deleted successfully"}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to delete post: {}", e)}))).into_response(),
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UpdatePost {
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub business_id: Option<i32>,
+    pub provider_id: Option<i32>,
+    pub updated_by: i32,
+    pub attachments: Vec<String>, // Moved here
+}
+
+pub async fn update_post_and_attachments(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<UpdatePost>,
+) -> impl IntoResponse {
+    // Start transaction
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to begin transaction: {}", e) }))
+            ).into_response();
+        }
+    };
+
+    // Update post
+    let update_result = sqlx::query!(
+        r#"
+        UPDATE posts 
+        SET 
+            title = COALESCE($1, title),
+            content = COALESCE($2, content)
+        WHERE id = $3
+        "#,
+        payload.title,
+        payload.content,
+        id
+    ).execute(&mut tx).await;
+
+    if let Err(e) = update_result {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to update post: {}", e) }))
+        ).into_response();
+    }
+
+    // Delete old attachments
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM attachments WHERE post_id = $1",
+        id
+    ).execute(&mut tx).await {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to delete old attachments: {}", e) }))
+        ).into_response();
+    }
+
+    // Upload new attachments
+    for path in &payload.attachments {
+        let result = sqlx::query!(
+            "INSERT INTO attachments (post_id, file_path, file_type) VALUES ($1, $2, 'image')",
+            id,
+            path
+        ).execute(&mut tx).await;
+
+        if let Err(e) = result {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to insert attachment: {}", e) }))
+            ).into_response();
+        }
+    }
+
+    // All good — commit
+    if let Err(e) = tx.commit().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to commit transaction: {}", e) }))
+        ).into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({ "message": "Post and attachments updated successfully" }))
+    ).into_response()
+}
