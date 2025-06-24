@@ -1,4 +1,4 @@
-use axun::{
+use axum::{
     Router,
     extract::{Path, Query,State, Json},
     http::StatusCode,
@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use serde::{Deserialize, Serialize};
 use chrono::NaiveDateTime;
 use crate::extractors::current_user::CurrentUser;
-use validate::Validate;
+
 
 pub fn booking_routes(pool: PgPool) -> Router {
     Router::new()
@@ -44,7 +44,7 @@ pub async fn create_booking(
     let target_type = payload.target_type.to_lowercase();
 
     if target_type != "business" && target_type != "provider" {
-        return (StatusCode::BAD_REQUEST, json!({"error": "Invalid target type"})).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid target type"})));
     }
 
     let user_id = user_id.parse::<i32>().unwrap_or(0);
@@ -54,11 +54,11 @@ pub async fn create_booking(
     let scheduled_time = payload.scheduled_time;
 
     if target_id <= 0 {
-        return (StatusCode::BAD_REQUEST, json!({"error": "Invalid target ID"})).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid target ID"})));
     }
 
     if scheduled_time < chrono::Local::now().naive_local() {
-        return (StatusCode::BAD_REQUEST, json!({"error": "Scheduled time cannot be in the past"})).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Scheduled time cannot be in the past"})));
     }
 
     let result = sqlx::query!(
@@ -80,16 +80,14 @@ pub async fn create_booking(
 
     match result {
         Ok(record) => {
-            (StatusCode::CREATED, json!({
+            (StatusCode::CREATED, Json(json!({
                 "message": "Booking created successfully",
                 "booking_id": record.id
-            })).into_response()
-        }
+            })))
+        },
         Err(e) => {
             eprintln!("Error creating booking: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, json!({
-                "error": "Failed to create booking"
-            })).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create booking"})))
         }
     }
 }
@@ -139,7 +137,7 @@ pub struct BookingsQueryByReceiver{
     status: String //can be pending, confirmed, cancelled or completed
 }
 
-ppub async fn get_bookings_received(
+pub async fn get_bookings_received(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Query(params): Query<BookingsQueryByReceiver>,
@@ -187,11 +185,16 @@ ppub async fn get_bookings_received(
     }
 }
 
+#[derive(Deserialize, Serialize, Debug,sqlx::FromRow)]
+pub struct BookingByIdQuery {
+    pub id: i32,
+}
+
 
 pub async fn get_booking_by_id(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Path(id): Path<i32>,
+    Path(id): Path<i32>,  
 ) -> impl IntoResponse {
     if id <= 0 {
         return (
@@ -200,14 +203,14 @@ pub async fn get_booking_by_id(
         );
     }
 
-    let result = sqlx::query_as!(
-        Booking,
-        "SELECT * FROM bookings WHERE client_id = $1 AND id = $2",
-        user_id.parse::<i32>().unwrap_or(0),
-        id
-    )
-    .fetch_one(&pool)
-    .await;
+ let result = sqlx::query_as::<_, Booking>(
+    "SELECT * FROM bookings WHERE client_id = $1 AND id = $2"
+)
+.bind(user_id.parse::<i32>().unwrap_or(0))
+.bind(id)
+.fetch_one(&pool)
+.await;
+
 
     match result {
         Ok(booking) => (
@@ -224,11 +227,7 @@ pub async fn get_booking_by_id(
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct UpdateQuery{
-    target_id: i32,
-    target_type: String,
-}
+
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct BookingUpdate{
@@ -242,10 +241,6 @@ pub struct UpdateQuery {
     target_type: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct BookingUpdate {
-    status: String,
-}
 
 pub async fn update_booking(
     State(pool): State<PgPool>,
@@ -342,8 +337,9 @@ pub async fn delete_booking(
     }
 }
 
+#[derive(Deserialize, Serialize, Debug,sqlx::FromRow)]
 pub struct ReschedulePayload {
-    pub new_scheduled_time: NaiveDateTime, // e.g., "2023-10-01 15:00:00"
+    pub scheduled_time: NaiveDateTime, // e.g., "2023-10-01 15:00:00"
 }
 
 pub async fn reschedule_booking(
