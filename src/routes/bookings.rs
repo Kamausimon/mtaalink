@@ -25,14 +25,12 @@ pub fn booking_routes(pool: PgPool) -> Router {
 
 #[derive(Serialize, Deserialize, sqlx::FromRow, Debug)]
 pub struct Booking {
-    pub id: i32,
     pub client_id: i32,
     pub target_type: String,                   // e.g., "business", "provider"
     pub target_id: i32,                        // e.g., business_id or provider_id
     pub branch_id: Option<i32>,                // e.g., branch_id if applicable
     pub service_description: String,           // e.g., "haircut", "plumbing service"
     pub scheduled_time: chrono::NaiveDateTime, // e.g., "2023-10-01 14:00:00"
-    pub status: String, // e.g., "pending", "confirmed", "cancelled", "completed"
 }
 
 pub async fn create_booking(
@@ -50,6 +48,7 @@ pub async fn create_booking(
     }
 
     let user_id = user_id.parse::<i32>().unwrap_or(0);
+    let client_id = user_id; // Assuming the booking is made by the client themselves
     let target_id = payload.target_id;
     let branch_id = payload.branch_id;
     let service_description = payload.service_description.trim().to_string();
@@ -62,11 +61,70 @@ pub async fn create_booking(
         );
     }
 
+   let target_exists = match target_type.as_str() {
+    "business" => sqlx::query_scalar!(
+        "SELECT id FROM businesses WHERE id = $1",
+        target_id
+    )
+    .fetch_optional(&pool)
+    .await,
+    "provider" => sqlx::query_scalar!(
+        "SELECT id FROM providers WHERE id = $1",
+        target_id
+    )
+    .fetch_optional(&pool)
+    .await,
+    _ => Ok(None),
+};
+
+    match target_exists {
+        Ok(Some(_)) => {}, // Target exists, proceed
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Target ID does not exist"})),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error checking target existence: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to check target existence"})),
+            );
+        }
+    }
+
     if scheduled_time < chrono::Local::now().naive_local() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Scheduled time cannot be in the past"})),
         );
+    }
+    //check if timme has been booked if so book plus 30 minutes later 
+    let existing_booking = sqlx::query!(
+        "SELECT id FROM bookings WHERE target_type = $1 AND target_id = $2 AND scheduled_time = $3",
+        target_type,
+        target_id,
+        scheduled_time
+    )
+    .fetch_optional(&pool)
+    .await;
+
+    match existing_booking {
+        Ok(Some(_)) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "This time slot has already been booked"})),
+            );
+        }
+        Ok(None) => {}, // No existing booking, proceed
+        Err(e) => {
+            eprintln!("Error checking existing booking: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to check existing booking"})),
+            );
+        }
     }
 
     let result = sqlx::query!(
@@ -75,7 +133,7 @@ pub async fn create_booking(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         "#,
-        user_id,
+        client_id,
         target_type,
         target_id,
         branch_id,
@@ -264,6 +322,7 @@ pub async fn update_booking(
     let target_id = params.target_id;
     let user_id = user_id.parse::<i32>().unwrap_or(0);
     let status = payload.status.to_lowercase();
+    // status: String, //can be pending, confirmed, cancelled or completed
 
     if !["provider", "business"].contains(&target_type.as_str()) {
         return (
@@ -279,20 +338,69 @@ pub async fn update_booking(
         );
     }
 
-    let result = sqlx::query!(
-        r#"
-        UPDATE bookings
-        SET status = $1
-        WHERE id = $2 AND target_type = $3 AND target_id = $4 AND client_id = $5
-        "#,
-        status,
-        id,
-        target_type,
+  // First check if the current user owns this business/provider
+let is_owner = match target_type.as_str() {
+    "business" => sqlx::query_scalar!(
+        "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
         target_id,
         user_id
     )
-    .execute(&pool)
-    .await;
+    .fetch_optional(&pool)
+    .await,
+    "provider" => sqlx::query_scalar!(
+        "SELECT id FROM providers WHERE id = $1 AND user_id = $2", 
+        target_id,
+        user_id
+    )
+    .fetch_optional(&pool)
+    .await,
+    _ => Ok(None),
+};
+
+// Check if user owns the target
+match is_owner {
+    Ok(Some(_)) => {}, // User owns the target, proceed
+    Ok(None) => {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "message": "You don't have permission to update this booking" })),
+        );
+    },
+    Err(e) => {
+        eprintln!("Error checking ownership: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": "Failed to check permissions" })),
+        );
+    }
+}
+
+// Then check if the booking exists (without the client_id check)
+let booking_exists = sqlx::query!(
+    "SELECT id FROM bookings WHERE id = $1 AND target_type = $2 AND target_id = $3",
+    id,
+    target_type,
+    target_id
+)
+.fetch_optional(&pool)
+.await;
+
+// Finally update without the client_id restriction
+let result = sqlx::query!(
+    r#"
+    UPDATE bookings
+    SET status = $1
+    WHERE id = $2 AND target_type = $3 AND target_id = $4
+    "#,
+    status,
+    id,
+    target_type,
+    target_id
+)
+.execute(&pool)
+.await;
+
+
 
     match result {
         Ok(_) => (
@@ -319,14 +427,37 @@ pub async fn delete_booking(
             StatusCode::BAD_REQUEST,
             Json(json!({ "message": "Invalid booking ID" })),
         );
+
     }
 
     let user_id = user_id.parse::<i32>().unwrap_or(0);
 
+    let booking  = sqlx::query!(
+        "SELECT id, client_id, target_type,target_id FROM bookings WHERE id = $1",
+        id
+    ).fetch_one(&pool).await;
+
+    match booking {
+        Ok(booking) => {
+            if booking.client_id != user_id {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "message": "You do not have permission to delete this booking" })),
+                );
+            }
+        },
+        Err(e) => {
+            eprintln!("Error fetching booking: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": "Failed to fetch the booking" })),
+            );
+        }
+    }
+
     let result = sqlx::query!(
-        "DELETE FROM bookings WHERE id = $1 AND client_id = $2",
-        id,
-        user_id
+        "DELETE FROM bookings WHERE id = $1",
+        id
     )
     .execute(&pool)
     .await;
