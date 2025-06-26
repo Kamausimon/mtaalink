@@ -9,3 +9,5 @@ pub mod favorites;
 pub mod messages;
 pub mod reviews;
 pub mod service_providers;
+pub mod locations;
+pub mod posts;

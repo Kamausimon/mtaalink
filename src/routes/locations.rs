@@ -128,6 +128,7 @@ pub async fn get_wards_by_constituency(
                     "status": "error",
                     "message": format!("Failed to fetch wards: {}", err)
                 })
+            )
         ),
     }
 }
@@ -357,6 +358,7 @@ pub async fn create_provider_location(
                     "status": "success",
                     "data": location
                 })
+            )
         ),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -433,7 +435,7 @@ pub async fn search_business_or_provider_by_location(
                 json!({
                     "status": "success",
                     "data": data
-                })
+                }))
         ),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -442,6 +444,7 @@ pub async fn search_business_or_provider_by_location(
                     "status": "error",
                     "message": format!("Failed to search: {}", err)
                 })
+            )
         ),
     }
 }

@@ -25,6 +25,8 @@ use routes::messages::messages_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
 use utils::attachments::attachments_routes;
+use routes::locations::locations_routes;
+use routes::posts::posts_routes;
 
 #[tokio::main]
 async fn main() {
@@ -59,6 +61,8 @@ async fn main() {
         .nest("/categories", category_routes(pool.clone())) // Mount the categories routes
         .nest("/bookings", booking_routes(pool.clone())) // Mount the bookings routes
         .nest("/admin", admin_routes(pool.clone())) // Mount the admin routes
+        .nest("/locations", locations_routes(pool.clone())) // Mount the locations routes
+        .nest("/posts", posts_routes(pool.clone())) // Mount the posts routes
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
