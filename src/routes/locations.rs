@@ -10,7 +10,6 @@ use sqlx::PgPool;
 use serde_json::json;
 use chrono::NaiveDateTime;
 use validator::Validate;
-use chrono::NaiveDateTime;
 use crate::extractors::current_user::CurrentUser;
 
 pub fn location_routes(pool:PgPool) -> Router {
