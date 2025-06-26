@@ -12,6 +12,7 @@ use crate::extractors::current_user::CurrentUser;
 use crate::utils::attachments::upload_attachments;
 use validator::Validate;
 use chrono::NaiveDateTime;
+use chrono::Utc;
 
 pub fn posts_routes(pool: PgPool) -> Router {
     Router::new()
@@ -25,7 +26,7 @@ pub fn posts_routes(pool: PgPool) -> Router {
         .with_state(pool)
 }
 
-#[derive(Debug, Serialize, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate, sqlx::FromRow)]
 pub struct CreatPost{
     #[validate(length(min = 1, max = 255))]
     pub title: String,
@@ -51,17 +52,16 @@ pub async fn create_posts(
         return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response();
     }
         
-     let post = sqlx::query!(
+     let result = sqlx::query!(
         r#"
-        INSERT INTO posts (title, content, business_id, provider_id, created_by, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO posts (title, content, business_id, provider_id, created_at)
+        VALUES ($1, $2, $3, $4, $5::timestamp)
         RETURNING id
         "#,
         payload.title,
         payload.content,
         payload.business_id,
         payload.provider_id,
-        user_id,
         payload.created_at
     )
     .fetch_one(&pool).await;
@@ -136,8 +136,8 @@ pub async fn get_post_by_id(
         .await;
 
     match post {
-        Ok(post) => (StatusCode::OK, Json(json!("post": post))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch post: {}", e)}))).into_response(),
+       Ok(posts) => (StatusCode::OK, Json(json!({"post": posts}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch post: {}", e)})))
     }
 }
 
@@ -198,7 +198,7 @@ pub async fn delete_post(
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, sqlx::FromRow)]
 pub struct UpdatePost {
     pub title: Option<String>,
     pub content: Option<String>,
