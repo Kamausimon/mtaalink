@@ -1,7 +1,7 @@
 use axum::{
     Router,
     http::StatusCode,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, Json},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -12,7 +12,7 @@ use chrono::NaiveDateTime;
 use validator::Validate;
 use crate::extractors::current_user::CurrentUser;
 
-pub fn location_routes(pool:PgPool) -> Router {
+pub fn locations_routes(pool:PgPool) -> Router {
     Router ::new ()
         .route("/allcounties", get(get_locations_counties))
         .route("/counties/:county_id/constituencies", get(get_constituencies_by_county))
@@ -21,11 +21,11 @@ pub fn location_routes(pool:PgPool) -> Router {
         .route("/branches/:branch_id/locations", get(get_branch_locations))   
         .route("/providers/:provider_id", get(create_provider_location))
          .route("/search", get(search_business_or_provider_by_location))
-        .route("/:id", get(get_location_by_id).put(update_location).delete(delete_location))
+        // .route("/:id", get(get_location_by_id).put(update_location).delete(delete_location))
         .with_state(pool)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Validate)]
+#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
 pub struct Counties{
   pub  id: i32,
    pub  name: String,
@@ -54,7 +54,7 @@ pub async fn get_locations_counties(State(pool) : State<PgPool>) -> impl IntoRes
 }
 
 // Get constituencies by county
-#[derive(Serialize, Deserialize, Debug, Clone, Validate)]
+#[derive(Serialize, Deserialize, Debug, Clone, Validate,sqlx::FromRow)]
 pub struct Constituency {
    pub id: i32,
    pub name: String,
@@ -94,7 +94,7 @@ pub async fn get_constituencies_by_county(
 }
 
 // Get wards by constituency
-#[derive(Serialize, Deserialize, Debug, Clone, Validate)]
+#[derive(Serialize, Deserialize, Debug, Clone, Validate,sqlx::FromRow)]
 pub struct Ward {
   pub  id: i32,
    pub name: String,
@@ -288,7 +288,6 @@ pub async fn get_branch_locations(
 pub struct ProviderLocation {
     id: i32,
     provider_id: i32,
-    #[validate(length(min = 1, max = 100))]
     latitude: f64,
     longitude: f64,
     ward_id: i32,
@@ -372,7 +371,7 @@ pub async fn create_provider_location(
 }
 
 //endpoint for searching for businesses or service providers by location
-#[derive(Deserialize, Serialize, Debug, Clone, Validate)]
+#[derive(Deserialize, Serialize, Debug, Clone, Validate, sqlx::FromRow)]
 pub struct SearchLocation{
  county_id: Option<i32>,
     constituency_id: Option<i32>,
@@ -423,7 +422,7 @@ pub async fn search_business_or_provider_by_location(
     }
 
     // Execute the query
-    let results = sqlx::query(&query)
+    let results = sqlx::query_as::<_, SearchLocation>(&query)
         .fetch_all(&pool)
         .await;
 
@@ -447,3 +446,6 @@ pub async fn search_business_or_provider_by_location(
         ),
     }
 }
+
+
+//todo implement get_location_by_id, update_location, delete_location
