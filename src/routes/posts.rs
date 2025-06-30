@@ -13,6 +13,7 @@ use crate::utils::attachments::upload_attachments;
 use validator::Validate;
 use chrono::NaiveDateTime;
 use chrono::Utc;
+use sqlx::{Transaction, Postgres};
 
 pub fn posts_routes(pool: PgPool) -> Router {
     Router::new()
@@ -215,7 +216,7 @@ pub async fn update_post_and_attachments(
     Json(payload): Json<UpdatePost>,
 ) -> impl IntoResponse {
     // Start transaction
-    let mut tx = match pool.begin().await {
+    let mut tx: Transaction<'_, Postgres> = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             return (
@@ -237,7 +238,7 @@ pub async fn update_post_and_attachments(
         payload.title,
         payload.content,
         id
-    ).execute(&mut tx).await;
+    ).execute(&mut *tx).await;
 
     if let Err(e) = update_result {
         let _ = tx.rollback().await;
@@ -251,11 +252,20 @@ pub async fn update_post_and_attachments(
     if let Err(e) = sqlx::query!(
         "DELETE FROM attachments WHERE post_id = $1",
         id
-    ).execute(&mut tx).await {
+    ).execute(&mut *tx).await {
         let _ = tx.rollback().await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("Failed to delete old attachments: {}", e) }))
+        ).into_response();
+    }
+
+    //place a limit on the number of attachments
+    if payload.attachments.len() > 5 {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Too many attachments. Maximum is 5." }))
         ).into_response();
     }
 
@@ -265,7 +275,7 @@ pub async fn update_post_and_attachments(
             "INSERT INTO attachments (post_id, file_path, file_type) VALUES ($1, $2, 'image')",
             id,
             path
-        ).execute(&mut tx).await;
+        ).execute(&mut *tx).await;
 
         if let Err(e) = result {
             let _ = tx.rollback().await;
