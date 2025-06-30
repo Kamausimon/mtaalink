@@ -17,7 +17,7 @@ pub fn locations_routes(pool:PgPool) -> Router {
         .route("/allcounties", get(get_locations_counties))
         .route("/counties/:county_id/constituencies", get(get_constituencies_by_county))
         .route("/constituencies/:constituency_id/wards", get(get_wards_by_constituency))
-        .route("/branches/:branch_id/location", post(create_branch_location))
+        .route("/branches/:business_id/location", post(create_branch_location))
         .route("/branches/:branch_id/locations", get(get_branch_locations))   
         .route("/providers/:provider_id", get(create_provider_location))
          .route("/search", get(search_business_or_provider_by_location))
@@ -132,30 +132,59 @@ pub async fn get_wards_by_constituency(
     }
 }
 
-// Create a branch location
 #[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
 pub struct BusinessBranchLocation {
     id: i32,
-    business_id: i32,
-    #[validate(length(min = 1, max = 100))]
+    created_at: NaiveDateTime,
+    updated_at: Option<NaiveDateTime>, // If nullable
     name: String,
     latitude: f64,
     longitude: f64,
     ward_id: i32,
-    #[validate(length(min = 1, max = 10))]
     phone: String,
-    #[validate(length(min = 1, max = 255))]
     address: String,
-    created_at: NaiveDateTime,
-    updated_at: NaiveDateTime,
 }
-
+// Create a new branch location for a business
 pub async fn create_branch_location (
-    Path(branch_id): Path<i32>,
+    Path(business_id): Path<i32>,
     State(pool): State<PgPool>,
      CurrentUser{user_id}: CurrentUser,
      Json(payload): Json<BusinessBranchLocation>
 ) -> impl IntoResponse {
+//validate that the user owns the business
+let business_ownership = sqlx::query_scalar!(
+    "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+    business_id,
+    user_id.parse::<i32>().unwrap()
+).fetch_optional(&pool).await;
+
+match business_ownership {
+    Ok(Some(_)) => {}, // User owns the business, proceed
+    Ok(None) => {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(
+                json!({
+                    "status": "error",
+                    "message": "You do not have permission to create a branch for this business"
+                })
+            )
+        );
+    },
+    Err(err) => {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                json!({
+                    "status": "error",
+                    "message": format!("Database error: {}", err)
+                })
+            )
+        );
+    }
+}
+
+
     //validate the payload
     if let Err(e) = payload.validate(){
         return (
@@ -170,7 +199,7 @@ pub async fn create_branch_location (
     }
 
     //check the business id 
-    if payload.business_id <= 0 {
+    if business_id <= 0 {
         return (
             StatusCode::BAD_REQUEST,
             Json(
@@ -184,19 +213,20 @@ pub async fn create_branch_location (
 
     // Insert the new branch location into the database
     let query = r#"
-        INSERT INTO business_branch_locations (business_id, name, latitude, longitude, ward_id, phone, address, created_by)
+        INSERT INTO business_branch_locations (business_id, name, latitude, longitude, ward_id, phone, address, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, created_at, updated_at,business_id, name, latitude, longitude,ward_id,phone,address"#;
+        RETURNING id, business_id, name, latitude, longitude, ward_id,phone,address,created_at,updated_at"#;
 
         let result = sqlx::query_as::<_, BusinessBranchLocation>(query)
-        .bind(payload.business_id)
+        .bind(business_id)
         .bind(payload.name)
         .bind(payload.latitude)
         .bind(payload.longitude)
         .bind(payload.ward_id)
         .bind(payload.phone)
         .bind(payload.address)
-        .bind(user_id)
+        .bind(NaiveDateTime::from_timestamp(chrono::Utc::now().timestamp(), 0)) // Use current time for created_at
+        .bind(NaiveDateTime::from_timestamp(chrono::Utc::now().timestamp(), 0)) // Use current time for updated_at
         .fetch_one(&pool)
         .await;
 

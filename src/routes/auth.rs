@@ -17,6 +17,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 use validator::Validate;
+use sqlx::{Transaction, Postgres};
 
 #[derive(Deserialize, Validate)]
 pub struct RegisterInput {
@@ -52,6 +53,16 @@ pub async fn register(
     Json(payload): Json<RegisterInput>,
 ) -> impl IntoResponse {
     //confirm that passwords match
+  let mut tx:Transaction<'_, Postgres> = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"message": "Database transaction error"})),
+            );
+        }
+    };
+
     if payload.password != payload.confirm_password {
         return (
             StatusCode::BAD_REQUEST,
@@ -98,21 +109,18 @@ pub async fn register(
         payload.email,
         hashed_password
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await;
-
-    match user {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(json!({"message": "User registered successfully"})),
-        ),
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"message": "Error creating user"})),
-            );
-        }
-    };
+ 
+    //if the user creation fails, rollback the transaction
+    if let Err(e) = user {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"message": "Error creating user", "error": e.to_string()})),
+        );
+    }
+ 
 
     let user_id = match user {
         Ok(record) => record.id,
@@ -124,11 +132,11 @@ pub async fn register(
         }
     };
 
-    //insert role-specific data
+    //attach transaction to the pool
     let role_result = match payload.role.as_str() {
         "client" => {
             sqlx::query!("INSERT INTO clients (user_id) VALUES ($1)", user_id)
-                .execute(&pool)
+                .execute(&mut *tx)
                 .await
         }
 
@@ -138,16 +146,24 @@ pub async fn register(
                 user_id,
                 payload.service_description
             )
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
         }
         "business" => {
+ //ensure business_name is provided
+       if payload.business_name.is_none() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"message": "Business name is required for business role"})),
+                );
+            }
+
             sqlx::query!(
                 "INSERT INTO businesses (user_id, business_name) VALUES ($1, $2)",
                 user_id,
                 payload.business_name
             )
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
         }
         _ => {
@@ -158,10 +174,38 @@ pub async fn register(
         }
     };
 
-    if role_result.is_err() {
+    //update the user role in the users table
+    let role_update_result = sqlx::query!(
+        "UPDATE users SET role = $1 WHERE id = $2",
+        payload.role,
+        user_id
+    )
+    .execute(&mut *tx)
+    .await;
+
+    //if there is an error updating the user role, rollback the transaction
+    if let Err(e) = role_update_result {
+        let _ = tx.rollback().await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": "Error creating role-specific data"})),
+            Json(json!({"message": "Error updating user role", "error": e.to_string()})),
+        );
+    }   
+
+ //if the role insertion fails, rollback the transaction
+  if let Err(e) = role_result {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"message": "Error assigning role", "error": e.to_string()})),
+        );
+    }
+
+    //if all is well, commit the transaction
+    if let Err(e) = tx.commit().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"message": "Error committing transaction", "error": e.to_string()})),
         );
     }
 

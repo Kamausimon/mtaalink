@@ -19,6 +19,7 @@ pub fn category_routes(pool: PgPool) -> Router {
         .route("/providers/by-category", get(get_providers_by_category)) // expects ?category=1
         .route("/businesses/by-category", get(get_businesses_by_category)) // expects ?category=1
         .route("/assignCategories", post(assign_categories))
+        //.route("/updateChosenCategory", post(update_chosen_category)) // Uncomment when update_category is implemented
         .with_state(pool)
 }
 
@@ -316,6 +317,55 @@ pub async fn assign_categories(
         }
     };
 
+   //get the name of the top chosen category
+   let top_category_id = payload.category_ids[0];
+
+   //get the name of the top chosen category
+   let top_category_name = sqlx::query_scalar!(
+       "SELECT name FROM categories WHERE id = $1",
+       top_category_id
+   )
+   .fetch_one(&pool)
+   .await;
+
+   let category_name = match top_category_name {
+       Ok(name) => name,
+       Err(e) => {
+           return (
+               StatusCode::INTERNAL_SERVER_ERROR,
+               Json(json!({ "error": format!("Failed to fetch category name: {}", e) })),
+           );
+       }
+   };
+
+   //update the providers or businesses with the top chosen category name
+   let update_query = match target_type.as_str() {
+         "provider" => "UPDATE providers SET category = $1 WHERE id = $2",
+            "business" => "UPDATE businesses SET category = $1 WHERE id = $2",
+            _ => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Unexpected error occurred." })),
+                );
+            }
+    };
+
+    //if there is an error updating the chosen category, return an error response
+    if let Err(e) = sqlx::query(update_query)
+        .bind(category_name)
+        .bind(target_id)
+        .execute(&pool)
+        .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to update chosen category: {}", e) })),
+        );
+    }
+
+
+
+    // Insert new category assignments
     for &cat_id in &payload.category_ids {
         if let Err(e) = sqlx::query(insert_query)
             .bind(target_id)

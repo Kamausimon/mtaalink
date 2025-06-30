@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
 use validator::Validate;
+use sqlx::{Transaction, Postgres};
 
 pub fn businesses_routes(pool: PgPool) -> Router {
     Router::new()
@@ -32,8 +33,8 @@ pub struct BusinessOnboardRequest {
     pub business_name: String,
     #[validate(length(min = 10))]
     pub description: String,
-    pub category: String,
-    pub location: String,
+    pub category: Option<String>,
+    pub location: Option<String>,
     pub license_number: String,
     #[validate(length(min = 11))]
     pub krapin: String,
@@ -50,6 +51,12 @@ pub async fn onboard_business(
     State(pool): State<PgPool>,
     Json(payload): Json<BusinessOnboardRequest>,
 ) -> impl IntoResponse {
+    let mut tx:Transaction<'_, Postgres> = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+
+ 
     if let Err(e) = payload.validate() {
         return (
             StatusCode::BAD_REQUEST,
@@ -65,21 +72,16 @@ pub async fn onboard_business(
     .await
     .unwrap();
 
-    if exists.is_some() {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({"error": "Business already onboarded"})),
-        );
-    }
-
+//if the business exists proceed with the update
+if let Some(_) = exists {
+   //if business exists continue to update
     let result = sqlx::query!(
-        "INSERT INTO businesses (
-        user_id, business_name, description, category, location,
-        license_number, krapin, phone_number, email, website, whatsapp
-    ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-    ) RETURNING id",
-        user_id.parse::<i32>().unwrap(),
+       "UPDATE businesses SET (
+        business_name, description, category, location, license_number,
+        krapin, phone_number, email, website, whatsapp
+        ) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        WHERE user_id = $11
+        RETURNING id",
         payload.business_name,
         payload.description,
         payload.category,
@@ -89,10 +91,28 @@ pub async fn onboard_business(
         payload.phone_number,
         payload.email,
         payload.website,
-        payload.whatsapp
+        payload.whatsapp,
+        user_id.parse::<i32>().unwrap()
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await;
+
+    //if the update fails, rollback the transaction
+    if let Err(e) = result {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        );
+    }
+
+    //commit the transaction
+    if let Err(e) = tx.commit().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        );
+    }
 
     match result {
         Ok(record) => (
@@ -104,6 +124,16 @@ pub async fn onboard_business(
             Json(json!({"error": e.to_string()})),
         ),
     }
+} else {
+    //return an error if the business does not exist
+     let _ = tx.rollback().await;
+    return (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"message": "Business not found, please use the onboard endpoint"})),
+    );
+}
+
+
 }
 
 //filter business by category, name and location
@@ -119,8 +149,8 @@ struct BusinessProvider {
     pub id: i32,
     pub business_name: String,
     pub description: String,
-    pub category: String,
-    pub location: String,
+    pub category: Option<String>,
+    pub location: Option<String>,
     pub phone_number: String,
     pub email: String,
     pub website: Option<String>,
@@ -130,7 +160,41 @@ struct BusinessProvider {
 pub async fn list_businesses(
     State(pool): State<PgPool>,
     Query(params): Query<BusinessQuery>,
+    CurrentUser { user_id }: CurrentUser,
 ) -> impl IntoResponse {
+
+    //search for the user role
+    let user_role_result = sqlx::query_scalar!(
+        "SELECT role FROM users WHERE id = $1",
+        user_id.parse::<i32>().unwrap()
+    )
+    .fetch_one(&pool)
+    .await;
+
+ match user_role_result {
+    Ok(Some(role))=> {
+        if role == "business" || role == "provider" {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "You are not authorized to view this resource"})),
+            );
+        }
+    },
+    Ok(None) => {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"})),
+        );
+    },
+    Err(e) => {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        );
+    },
+ }
+  
+
     let mut query = String::from(
         r#"
         SELECT 
@@ -169,22 +233,27 @@ pub async fn list_businesses(
     }
 
     match q.fetch_all(&pool).await {
-        Ok(bindings) => Json(json!({
+        Ok(bindings) => (
+             StatusCode::OK,
+             Json(json!({
             "message": "Businesses fetched successfully",
             "businesses": bindings,
 
         })),
-        Err(e) => Json(json!({"error": e.to_string()})),
+        ),
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        },
     }
 }
 
 #[derive(Deserialize, Debug, Validate)]
 pub struct BusinessUpdateRequest {
-    #[validate(length(min = 3))]
-    pub business_name: Option<String>,
     #[validate(length(min = 10))]
     pub description: Option<String>,
-    pub location: Option<String>,
     #[validate(length(min = 10))]
     pub phone_number: Option<String>,
     #[validate(email)]
@@ -198,6 +267,37 @@ pub async fn update_business_profile(
     State(pool): State<PgPool>,
     Json(payload): Json<BusinessUpdateRequest>,
 ) -> impl IntoResponse {
+  //search for the user role
+  let user_role_match = sqlx::query_scalar!(
+        "SELECT role FROM users WHERE id = $1",
+        user_id.parse::<i32>().unwrap()
+    )
+    .fetch_one(&pool)
+    .await;
+
+    match user_role_match {
+        Ok(Some(role)) => {
+            if role == "client" && role == "provider" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "You are not authorized to update this business"})),
+                );
+            }
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+    }
+
     if let Err(e) = payload.validate() {
         return (
             StatusCode::BAD_REQUEST,
@@ -210,18 +310,8 @@ pub async fn update_business_profile(
     let mut updates = Vec::new();
     let mut param_index = 1;
 
-    if let Some(ref value) = payload.business_name {
-        updates.push(format!("business_name = ${}", param_index));
-        bindings.push(value.clone());
-        param_index += 1;
-    }
     if let Some(ref value) = payload.description {
         updates.push(format!("description = ${}", param_index));
-        bindings.push(value.clone());
-        param_index += 1;
-    }
-    if let Some(ref value) = payload.location {
-        updates.push(format!("location = ${}", param_index));
         bindings.push(value.clone());
         param_index += 1;
     }
@@ -253,7 +343,7 @@ pub async fn update_business_profile(
     }
 
     query.push_str(&updates.join(", "));
-    query.push_str(&format!("WHERE user_id = ${}", param_index));
+    query.push_str(&format!(" WHERE user_id = ${}", param_index));
     let user_id = user_id.parse::<i32>().unwrap();
 
     let mut q = sqlx::query(&query);
@@ -280,6 +370,37 @@ pub async fn upload_business_logo(
     State(pool): State<PgPool>,
     multipart: Multipart,
 ) -> impl IntoResponse {
+    //search for the user role
+    let user_role_match = sqlx::query_scalar!(
+        "SELECT role FROM users WHERE id = $1",
+        user_id.parse::<i32>().unwrap()
+    )
+    .fetch_one(&pool)
+    .await;
+
+    match user_role_match {
+        Ok(Some(role)) => {
+            if role == "client" || role == "provider" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "You are not authorized to view this resource"})),
+                );
+            }
+        }
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+    }
+
     let upload_dir = "uploads/businesses/business_logos";
     match save_image_to_fs(multipart, upload_dir).await {
         Ok(file_name) => {
@@ -291,6 +412,7 @@ pub async fn upload_business_logo(
             )
             .execute(&pool)
             .await;
+
 
             match result {
                 Ok(_) => (
