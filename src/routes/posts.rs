@@ -39,7 +39,7 @@ pub struct CreatPost{
     
     pub provider_id: i32,
     
-    pub created_by: i32,
+    pub updated_at: NaiveDateTime,
     
     pub created_at: NaiveDateTime,
 }
@@ -55,15 +55,16 @@ pub async fn create_posts(
         
      let result = sqlx::query!(
         r#"
-        INSERT INTO posts (title, content, business_id, provider_id, created_at)
-        VALUES ($1, $2, $3, $4, $5::timestamp)
+        INSERT INTO posts (title, content, business_id, provider_id, created_at,updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         "#,
         payload.title,
         payload.content,
         payload.business_id,
         payload.provider_id,
-        payload.created_at
+     Utc::now(),
+        Utc::now() // Use current time for both created_at and updated_at
     )
     .fetch_one(&pool).await;
 
