@@ -14,6 +14,7 @@ use validator::Validate;
 use chrono::NaiveDateTime;
 use chrono::Utc;
 use sqlx::{Transaction, Postgres};
+ use chrono::DateTime;
 
 pub fn posts_routes(pool: PgPool) -> Router {
     Router::new()
@@ -35,13 +36,11 @@ pub struct CreatPost{
     #[validate(length(min = 1, max = 1000))]
     pub content: String,
     
-    pub business_id: i32,
+    pub business_id: Option<i32>,
     
-    pub provider_id: i32,
-    
-    pub updated_at: NaiveDateTime,
-    
-    pub created_at: NaiveDateTime,
+    pub provider_id: Option<i32>,
+
+
 }
 
 pub async fn create_posts(
@@ -49,15 +48,76 @@ pub async fn create_posts(
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<CreatPost>,
 )-> impl IntoResponse {
+    let user_id = user_id.parse::<i32>().unwrap_or(0);
+
+    //check whther user is business or provider
+   let user_role = sqlx::query_scalar!("SELECT role FROM users WHERE id = $1", user_id)
+        .fetch_one(&pool)
+        .await;
+
+         match user_role {
+    Ok(Some(role)) => {
+        if role == "client" {
+            return (StatusCode::FORBIDDEN, 
+                    Json(json!({"error": "User is not authorized to create posts"})))
+                   .into_response();
+        }
+    },
+    Ok(None) => {
+        return (StatusCode::NOT_FOUND, 
+                Json(json!({"error": "User role not found"})))
+               .into_response();
+    },
+    Err(e) => {
+        return (StatusCode::INTERNAL_SERVER_ERROR, 
+                Json(json!({"error": format!("Failed to fetch user role: {}", e)})))
+               .into_response();
+    }
+}
+ 
+
+
     if let Err(e) = payload.validate(){
         return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response();
     }
+
+    //ensure that the provider or business exists
+    if let Some(business_id) = payload.business_id {
+        let business_exists = sqlx::query!("SELECT id FROM businesses WHERE id = $1", business_id)
+            .fetch_optional(&pool)
+            .await;
+        
+      match business_exists {
+            Ok(Some(_)) => {},
+            Ok(None) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({"error": "Business does not exist"}))).into_response();
+            }
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check business existence: {}", e)}))).into_response();
+            }
+        }
+
+    }
+
+    if let Some(provider_id) = payload.provider_id {
+        let provider_exists = sqlx::query!("SELECT id FROM providers WHERE id = $1", provider_id)
+            .fetch_optional(&pool)
+            .await;
+        match provider_exists {
+            Ok(Some(_)) => {},
+            Ok(None) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({"error": "Provider does not exist"}))).into_response();
+            }
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check provider existence: {}", e)}))).into_response();
+            }
+    }}
         
      let result = sqlx::query!(
         r#"
         INSERT INTO posts (title, content, business_id, provider_id, created_at,updated_at)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
+        RETURNING id, title, content, business_id, provider_id, created_at,updated_at
         "#,
         payload.title,
         payload.content,
@@ -86,6 +146,7 @@ pub struct PostQuery {
     pub business_id: Option<i32>,
     pub provider_id: Option<i32>,
 }
+
 
 pub async fn get_All_posts(
     State(pool): State<PgPool>,
@@ -122,10 +183,10 @@ pub struct Post{
     pub id: i32,
     pub title: String,
     pub content: String,
-    pub business_id: i32,
-    pub provider_id: i32,
-    pub created_by: i32,
-    pub created_at: NaiveDateTime,
+    pub business_id: Option<i32>,
+    pub provider_id: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 pub async fn get_post_by_id(
@@ -189,7 +250,24 @@ pub async fn get_posts_by_business_id(
 pub async fn delete_post(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
 ) -> impl IntoResponse {
+    //ensure that the post exists
+    let post_exists = sqlx::query!("SELECT id FROM posts WHERE id = $1", id)
+        .fetch_optional(&pool)
+        .await;
+    match post_exists {
+        Ok(Some(_)) => {},
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": "Post not found"}))).into_response();
+        }
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check post existence: {}", e)}))).into_response();
+        }
+    }
+
+    
+
     let result = sqlx::query!("DELETE FROM posts WHERE id = $1", id)
         .execute(&pool)
         .await;
