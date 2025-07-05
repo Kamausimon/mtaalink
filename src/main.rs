@@ -1,10 +1,11 @@
 use axum::{Router, routing::get};
 use axum_server::bind;
+use axum::http::{Method, HeaderValue, header};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{CorsLayer, Any};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -38,8 +39,15 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     println!("Using database URL: {}", database_url);
 
+    let frontend_origin = env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
     // Enable CORS for all origins
-    let cors_layer = CorsLayer::permissive();
+    let cors_layer = CorsLayer::new()
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
+        .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE, header::CONTENT_LENGTH, header::ACCEPT])
+        .allow_origin(frontend_origin.parse::<axum::http::HeaderValue>().unwrap())
+        .allow_credentials(true);
 
     // Create a connection pool
     let pool = PgPoolOptions::new()
@@ -65,6 +73,7 @@ async fn main() {
         .nest("/posts", posts_routes(pool.clone())) // Mount the posts routes
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
+        .layer(cors_layer) // ✅ This enables CORS for all origins
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
         .route("/", get(root));
 
