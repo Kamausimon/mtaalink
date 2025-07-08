@@ -19,6 +19,18 @@ use uuid::Uuid;
 use validator::Validate;
 use sqlx::{Transaction, Postgres};
 
+pub fn auth_routes(pool: PgPool) -> Router {
+    Router::new()
+        .route("/register", post(register))
+        .route("/login", post(login_handler))
+        .route("/me", get(me))
+        .route("/forgot-password", post(forgot_password))
+        .route("/reset-password", post(reset_password))
+        .with_state(pool.clone())
+    // You can add more routes here in the future
+}
+
+
 #[derive(Deserialize, Validate)]
 pub struct RegisterInput {
     #[validate(length(min = 3, max = 32))]
@@ -37,22 +49,38 @@ pub struct RegisterInput {
     pub business_name: Option<String>,       // Optional business name field
 }
 
-pub fn auth_routes(pool: PgPool) -> Router {
-    Router::new()
-        .route("/register", post(register))
-        .route("/login", post(login_handler))
-        .route("/me", get(me))
-        .route("/forgot-password", post(forgot_password))
-        .route("/reset-password", post(reset_password))
-        .with_state(pool.clone())
-    // You can add more routes here in the future
+fn normalize_email(email: &str) -> String {
+    // Convert to lowercase and trim whitespace
+    let  normalized = email.trim().to_lowercase();
+    
+    // Optional: Special handling for Gmail addresses
+    if let Some(at_pos) = normalized.find('@') {
+        let (username, domain) = normalized.split_at(at_pos);
+        if domain == "@gmail.com" {
+            // Remove dots from Gmail username part
+            let username_no_dots = username.replace(".", "");
+            return username_no_dots + domain;
+        }
+    }
+    
+    normalized
 }
+
+fn normalize_username(username: &str) -> String {
+    // Convert to lowercase and trim whitespace
+   let mut normalized = username.trim().to_lowercase();
+
+   normalized
+}
+
 
 pub async fn register(
     State(pool): State<PgPool>,
-    Json(payload): Json<RegisterInput>,
+    Json(mut payload): Json<RegisterInput>,
 ) -> impl IntoResponse {
     //confirm that passwords match
+    payload.email = normalize_email(&payload.email);
+    payload.username = normalize_username(&payload.username);
   let mut tx:Transaction<'_, Postgres> = match pool.begin().await {
         Ok(tx) => tx,
         Err(_) => {
@@ -229,10 +257,12 @@ pub struct LoginRequest {
 
 pub async fn login_handler(
     State(db): State<PgPool>,
-    Json(payload): Json<LoginRequest>,
+    Json(mut payload): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    payload.email = normalize_email(&payload.email);
+
     let user = sqlx::query!(
-        "SELECT id, username, password FROM users WHERE email = $1",
+        "SELECT id, username, password,role FROM users WHERE email = $1",
         payload.email
     )
     .fetch_optional(&db)
@@ -253,7 +283,8 @@ pub async fn login_handler(
                     "message": "Login successful",
                     "token": token,
                     "user_id": user.id,
-                    "username": user.username
+                    "username": user.username,
+                    "role": user.role.unwrap_or("unknown".to_string()),
                 })),
             );
         }
