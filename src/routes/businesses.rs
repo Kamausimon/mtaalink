@@ -33,8 +33,8 @@ pub struct BusinessOnboardRequest {
     pub business_name: String,
     #[validate(length(min = 10))]
     pub description: String,
-    pub category: Option<String>,
-    pub location: Option<String>,
+    pub category: Option<String>,//category to be handled by a different handler
+    pub location: Option<String>, //location to be handled by a different handler
     pub license_number: String,
     #[validate(length(min = 11))]
     pub krapin: String,
@@ -72,6 +72,8 @@ pub async fn onboard_business(
     .await
     .unwrap();
 
+    println!("Query result for user_id {}: exists = {:?}", user_id, exists);
+
 //if the business exists proceed with the update
 if let Some(_) = exists {
    //if business exists continue to update
@@ -96,6 +98,8 @@ if let Some(_) = exists {
     )
     .fetch_one(&mut *tx)
     .await;
+    println!("Update result: {:?}", result);
+    
 
     //if the update fails, rollback the transaction
     if let Err(e) = result {
