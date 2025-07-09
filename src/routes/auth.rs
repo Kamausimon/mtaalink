@@ -236,6 +236,7 @@ pub async fn register(
             Json(json!({"message": "Error committing transaction", "error": e.to_string()})),
         );
     }
+    let token = create_jwt(&user_id.to_string());
 
     //successfully registered
     (
@@ -244,7 +245,8 @@ pub async fn register(
             "message": "User registered successfully",
             "user_id": user_id,
             "username": payload.username,
-            "role": payload.role
+            "role": payload.role,
+            "token": token,
         })),
     )
 }
