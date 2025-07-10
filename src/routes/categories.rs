@@ -270,6 +270,14 @@ pub async fn assign_categories(
         );
     }
 
+    const MAX_CATEGORIES: usize = 5; // Define a constant for the maximum number of categories
+    if payload.category_ids.len() > MAX_CATEGORIES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("You can assign a maximum of {} categories.", MAX_CATEGORIES) })),
+        );
+    }
+
     if payload.category_ids.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
