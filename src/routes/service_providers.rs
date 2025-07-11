@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
 use validator::Validate;
+use sqlx::{Postgres, Transaction};
 
 pub fn service_providers_routes(pool: PgPool) -> Router {
     Router::new()
@@ -23,7 +24,7 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
         .with_state(pool.clone())
 }
 
-#[derive(Deserialize, Debug, Validate)]
+#[derive(Deserialize, Debug, Validate,sqlx::FromRow)]
 pub struct ProviderOnboardRequest {
     #[validate(length(min = 3))]
     pub service_name: String,
@@ -45,6 +46,11 @@ pub async fn onboard_service_provider(
     State(pool): State<PgPool>,
     Json(payload): Json<ProviderOnboardRequest>,
 ) -> impl IntoResponse {
+let mut tx:Transaction<'_,Postgres> = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"}))),
+    };
+
     if let Err(e) = payload.validate() {
         return (
             StatusCode::BAD_REQUEST,
@@ -60,37 +66,62 @@ pub async fn onboard_service_provider(
     .await
     .unwrap();
 
-    if exists.is_some() {
+    if let Some(_) = exists {
+        //if the business exists continue to update the profile
+        let result = sqlx::query!(
+            "UPDATE providers SET(
+             service_name, service_description,category,location,phone_number,email,website,whatsapp) = 
+             ($1, $2, $3, $4, $5, $6, $7,$8) WHERE user_id = $9 RETURNING id",
+            payload.service_name,
+            payload.service_description,
+            payload.category,
+            payload.location,
+            payload.phone_number,
+            payload.email,
+            payload.website,
+            payload.whatsapp,
+            user_id.parse::<i32>().unwrap()
+        )
+        .fetch_one(&mut *tx)
+        .await;
+        println!("Update result: {:?}", result);
+
+        //if the update fails rollback the transaction
+        if let Err(e) = result {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );}
+
+            //commit the transaction if the update is successful
+           if let Err(e) = tx.commit().await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            ); }
+
+            match result {
+                Ok(record) => (
+                     StatusCode::CREATED,
+                    Json(json!({"message": "Business onboarded successfully", "provider_id": record.id}))
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),        
+            }
+    }  else {
+        //if the provider does not exist, return an error
+        let _ = tx.rollback().await;
         return (
-            StatusCode::CONFLICT,
-            Json(json!({"error": "Service provider already onboarded"})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Provider does not exist, please use the onboarding route"})),
         );
     }
 
-    let result = sqlx::query!(
-         "INSERT INTO providers (user_id,service_name, service_description, category, location, phone_number, email, website, whatsapp) 
-          VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9) RETURNING id",
-          user_id.parse::<i32>().unwrap(),
-          payload.service_name,
-          payload.service_description,
-          payload.category,
-          payload.location,
-          payload.phone_number,
-          payload.email,
-            payload.website,
-            payload.whatsapp
-       ).fetch_one(&pool).await;
+    
 
-    match result {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(json!({"message": "Service provider onboarded successfully"})),
-        ),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to onboard service provider"})),
-        ),
-    }
 }
 
 #[derive(Deserialize, Debug)]
