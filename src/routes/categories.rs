@@ -274,7 +274,9 @@ pub async fn assign_categories(
     if payload.category_ids.len() > MAX_CATEGORIES {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": format!("You can assign a maximum of {} categories.", MAX_CATEGORIES) })),
+            Json(
+                json!({ "error": format!("You can assign a maximum of {} categories.", MAX_CATEGORIES) }),
+            ),
         );
     }
 
@@ -325,37 +327,35 @@ pub async fn assign_categories(
         }
     };
 
-   //get the name of the top chosen category
-   let top_category_id = payload.category_ids[0];
+    //get the name of the top chosen category
+    let top_category_id = payload.category_ids[0];
 
-   //get the name of the top chosen category
-   let top_category_name = sqlx::query_scalar!(
-       "SELECT name FROM categories WHERE id = $1",
-       top_category_id
-   )
-   .fetch_one(&pool)
-   .await;
+    //get the name of the top chosen category
+    let top_category_name =
+        sqlx::query_scalar!("SELECT name FROM categories WHERE id = $1", top_category_id)
+            .fetch_one(&pool)
+            .await;
 
-   let category_name = match top_category_name {
-       Ok(name) => name,
-       Err(e) => {
-           return (
-               StatusCode::INTERNAL_SERVER_ERROR,
-               Json(json!({ "error": format!("Failed to fetch category name: {}", e) })),
-           );
-       }
-   };
+    let category_name = match top_category_name {
+        Ok(name) => name,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to fetch category name: {}", e) })),
+            );
+        }
+    };
 
-   //update the providers or businesses with the top chosen category name
-   let update_query = match target_type.as_str() {
-         "provider" => "UPDATE providers SET category = $1 WHERE id = $2",
-            "business" => "UPDATE businesses SET category = $1 WHERE id = $2",
-            _ => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": "Unexpected error occurred." })),
-                );
-            }
+    //update the providers or businesses with the top chosen category name
+    let update_query = match target_type.as_str() {
+        "provider" => "UPDATE providers SET category = $1 WHERE id = $2",
+        "business" => "UPDATE businesses SET category = $1 WHERE id = $2",
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Unexpected error occurred." })),
+            );
+        }
     };
 
     //if there is an error updating the chosen category, return an error response
@@ -370,8 +370,6 @@ pub async fn assign_categories(
             Json(json!({ "error": format!("Failed to update chosen category: {}", e) })),
         );
     }
-
-
 
     // Insert new category assignments
     for &cat_id in &payload.category_ids {

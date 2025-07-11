@@ -1,20 +1,20 @@
-use axum::{
-    extract::{Path, Query,State,Json},
-    http::StatusCode,
-    response::IntoResponse,
-    Router,
-    routing::{post, get},
-};
-use sqlx::PgPool;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::attachments::upload_attachments;
-use validator::Validate;
+use axum::{
+    Router,
+    extract::{Json, Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
+use chrono::DateTime;
 use chrono::NaiveDateTime;
 use chrono::Utc;
-use sqlx::{Transaction, Postgres};
- use chrono::DateTime;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sqlx::PgPool;
+use sqlx::{Postgres, Transaction};
+use validator::Validate;
 
 pub fn posts_routes(pool: PgPool) -> Router {
     Router::new()
@@ -29,56 +29,62 @@ pub fn posts_routes(pool: PgPool) -> Router {
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate, sqlx::FromRow)]
-pub struct CreatPost{
+pub struct CreatPost {
     #[validate(length(min = 1, max = 255))]
     pub title: String,
-    
+
     #[validate(length(min = 1, max = 1000))]
     pub content: String,
-    
+
     pub business_id: Option<i32>,
-    
+
     pub provider_id: Option<i32>,
-
-
 }
 
 pub async fn create_posts(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<CreatPost>,
-)-> impl IntoResponse {
+) -> impl IntoResponse {
     let user_id = user_id.parse::<i32>().unwrap_or(0);
 
     //check whther user is business or provider
-   let user_role = sqlx::query_scalar!("SELECT role FROM users WHERE id = $1", user_id)
+    let user_role = sqlx::query_scalar!("SELECT role FROM users WHERE id = $1", user_id)
         .fetch_one(&pool)
         .await;
 
-         match user_role {
-    Ok(Some(role)) => {
-        if role == "client" {
-            return (StatusCode::FORBIDDEN, 
-                    Json(json!({"error": "User is not authorized to create posts"})))
-                   .into_response();
+    match user_role {
+        Ok(Some(role)) => {
+            if role == "client" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "User is not authorized to create posts"})),
+                )
+                    .into_response();
+            }
         }
-    },
-    Ok(None) => {
-        return (StatusCode::NOT_FOUND, 
-                Json(json!({"error": "User role not found"})))
-               .into_response();
-    },
-    Err(e) => {
-        return (StatusCode::INTERNAL_SERVER_ERROR, 
-                Json(json!({"error": format!("Failed to fetch user role: {}", e)})))
-               .into_response();
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User role not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to fetch user role: {}", e)})),
+            )
+                .into_response();
+        }
     }
-}
- 
 
-
-    if let Err(e) = payload.validate(){
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))).into_response();
+    if let Err(e) = payload.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response();
     }
 
     //ensure that the provider or business exists
@@ -86,17 +92,24 @@ pub async fn create_posts(
         let business_exists = sqlx::query!("SELECT id FROM businesses WHERE id = $1", business_id)
             .fetch_optional(&pool)
             .await;
-        
-      match business_exists {
-            Ok(Some(_)) => {},
+
+        match business_exists {
+            Ok(Some(_)) => {}
             Ok(None) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({"error": "Business does not exist"}))).into_response();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Business does not exist"})),
+                )
+                    .into_response();
             }
             Err(e) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check business existence: {}", e)}))).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to check business existence: {}", e)})),
+                )
+                    .into_response();
             }
         }
-
     }
 
     if let Some(provider_id) = payload.provider_id {
@@ -104,16 +117,25 @@ pub async fn create_posts(
             .fetch_optional(&pool)
             .await;
         match provider_exists {
-            Ok(Some(_)) => {},
+            Ok(Some(_)) => {}
             Ok(None) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({"error": "Provider does not exist"}))).into_response();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Provider does not exist"})),
+                )
+                    .into_response();
             }
             Err(e) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check provider existence: {}", e)}))).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to check provider existence: {}", e)})),
+                )
+                    .into_response();
             }
-    }}
-        
-     let result = sqlx::query!(
+        }
+    }
+
+    let result = sqlx::query!(
         r#"
         INSERT INTO posts (title, content, business_id, provider_id, created_at,updated_at)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -123,30 +145,27 @@ pub async fn create_posts(
         payload.content,
         payload.business_id,
         payload.provider_id,
-     Utc::now(),
+        Utc::now(),
         Utc::now() // Use current time for both created_at and updated_at
     )
-    .fetch_one(&pool).await;
+    .fetch_one(&pool)
+    .await;
 
     match result {
-        Ok(post) => {
-            (StatusCode::CREATED, Json(json!({"post_id": post.id}))).into_response()
-        }
-        Err(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to create post: {}", e)}))).into_response()
-        }
+        Ok(post) => (StatusCode::CREATED, Json(json!({"post_id": post.id}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create post: {}", e)})),
+        )
+            .into_response(),
     }
-
-
 }
-
 
 #[derive(Deserialize, Serialize)]
 pub struct PostQuery {
     pub business_id: Option<i32>,
     pub provider_id: Option<i32>,
 }
-
 
 pub async fn get_All_posts(
     State(pool): State<PgPool>,
@@ -167,19 +186,21 @@ pub async fn get_All_posts(
         query.push_str(&conditions.join(" AND "));
     }
 
-    let posts = sqlx::query_as::<_, Post>(&query)
-        .fetch_all(&pool)
-        .await;
+    let posts = sqlx::query_as::<_, Post>(&query).fetch_all(&pool).await;
 
     match posts {
         Ok(posts) => (StatusCode::OK, Json(posts)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch posts: {}", e)}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch posts: {}", e)})),
+        )
+            .into_response(),
     }
 }
 
 //todo implement get_post_by_id, get_posts_by_provider_id, get_posts_by_business_id, delete_post, update_post
 #[derive(Deserialize, Serialize, sqlx::FromRow)]
-pub struct Post{
+pub struct Post {
     pub id: i32,
     pub title: String,
     pub content: String,
@@ -189,18 +210,18 @@ pub struct Post{
     pub updated_at: DateTime<Utc>,
 }
 
-pub async fn get_post_by_id(
-    State(pool): State<PgPool>,
-    Path(id): Path<i32>,
-) -> impl IntoResponse {
+pub async fn get_post_by_id(State(pool): State<PgPool>, Path(id): Path<i32>) -> impl IntoResponse {
     let post = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE id = $1")
         .bind(id)
         .fetch_one(&pool)
         .await;
 
     match post {
-       Ok(posts) => (StatusCode::OK, Json(json!({"post": posts}))),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch post: {}", e)})))
+        Ok(posts) => (StatusCode::OK, Json(json!({"post": posts}))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch post: {}", e)})),
+        ),
     }
 }
 
@@ -221,7 +242,11 @@ pub async fn get_posts_by_provider_id(
 
     match posts {
         Ok(posts) => (StatusCode::OK, Json(json!({"posts": posts}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch posts: {}", e)}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch posts: {}", e)})),
+        )
+            .into_response(),
     }
 }
 
@@ -229,7 +254,6 @@ pub async fn get_posts_by_provider_id(
 pub struct BusinessPostsQuery {
     pub business_id: i32,
 }
-
 
 pub async fn get_posts_by_business_id(
     State(pool): State<PgPool>,
@@ -242,7 +266,11 @@ pub async fn get_posts_by_business_id(
 
     match posts {
         Ok(posts) => (StatusCode::OK, Json(json!({"posts": posts}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch posts: {}", e)}))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch posts: {}", e)})),
+        )
+            .into_response(),
     }
 }
 
@@ -257,24 +285,38 @@ pub async fn delete_post(
         .fetch_optional(&pool)
         .await;
     match post_exists {
-        Ok(Some(_)) => {},
+        Ok(Some(_)) => {}
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": "Post not found"}))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Post not found"})),
+            )
+                .into_response();
         }
         Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to check post existence: {}", e)}))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to check post existence: {}", e)})),
+            )
+                .into_response();
         }
     }
-
-    
 
     let result = sqlx::query!("DELETE FROM posts WHERE id = $1", id)
         .execute(&pool)
         .await;
 
     match result {
-        Ok(_) => (StatusCode::OK, Json(json!({"message": "Post deleted successfully"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to delete post: {}", e)}))).into_response(),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({"message": "Post deleted successfully"})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to delete post: {}", e)})),
+        )
+            .into_response(),
     }
 }
 
@@ -300,8 +342,9 @@ pub async fn update_post_and_attachments(
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to begin transaction: {}", e) }))
-            ).into_response();
+                Json(json!({ "error": format!("Failed to begin transaction: {}", e) })),
+            )
+                .into_response();
         }
     };
 
@@ -317,26 +360,30 @@ pub async fn update_post_and_attachments(
         payload.title,
         payload.content,
         id
-    ).execute(&mut *tx).await;
+    )
+    .execute(&mut *tx)
+    .await;
 
     if let Err(e) = update_result {
         let _ = tx.rollback().await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Failed to update post: {}", e) }))
-        ).into_response();
+            Json(json!({ "error": format!("Failed to update post: {}", e) })),
+        )
+            .into_response();
     }
 
     // Delete old attachments
-    if let Err(e) = sqlx::query!(
-        "DELETE FROM attachments WHERE post_id = $1",
-        id
-    ).execute(&mut *tx).await {
+    if let Err(e) = sqlx::query!("DELETE FROM attachments WHERE post_id = $1", id)
+        .execute(&mut *tx)
+        .await
+    {
         let _ = tx.rollback().await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Failed to delete old attachments: {}", e) }))
-        ).into_response();
+            Json(json!({ "error": format!("Failed to delete old attachments: {}", e) })),
+        )
+            .into_response();
     }
 
     //place a limit on the number of attachments
@@ -344,8 +391,9 @@ pub async fn update_post_and_attachments(
         let _ = tx.rollback().await;
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Too many attachments. Maximum is 5." }))
-        ).into_response();
+            Json(json!({ "error": "Too many attachments. Maximum is 5." })),
+        )
+            .into_response();
     }
 
     // Upload new attachments
@@ -354,14 +402,17 @@ pub async fn update_post_and_attachments(
             "INSERT INTO attachments (post_id, file_path, file_type) VALUES ($1, $2, 'image')",
             id,
             path
-        ).execute(&mut *tx).await;
+        )
+        .execute(&mut *tx)
+        .await;
 
         if let Err(e) = result {
             let _ = tx.rollback().await;
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to insert attachment: {}", e) }))
-            ).into_response();
+                Json(json!({ "error": format!("Failed to insert attachment: {}", e) })),
+            )
+                .into_response();
         }
     }
 
@@ -369,12 +420,14 @@ pub async fn update_post_and_attachments(
     if let Err(e) = tx.commit().await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Failed to commit transaction: {}", e) }))
-        ).into_response();
+            Json(json!({ "error": format!("Failed to commit transaction: {}", e) })),
+        )
+            .into_response();
     }
 
     (
         StatusCode::OK,
-        Json(json!({ "message": "Post and attachments updated successfully" }))
-    ).into_response()
+        Json(json!({ "message": "Post and attachments updated successfully" })),
+    )
+        .into_response()
 }
