@@ -1,11 +1,11 @@
+use axum::http::{HeaderValue, Method, header};
 use axum::{Router, routing::get};
 use axum_server::bind;
-use axum::http::{Method, HeaderValue, header};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -22,12 +22,12 @@ use routes::categories::category_routes;
 use routes::clients::client_routes;
 use routes::dashboard::dashboard;
 use routes::favorites::favorites_routes;
+use routes::locations::locations_routes;
 use routes::messages::messages_routes;
+use routes::posts::posts_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
 use utils::attachments::attachments_routes;
-use routes::locations::locations_routes;
-use routes::posts::posts_routes;
 
 #[tokio::main]
 async fn main() {
@@ -39,13 +39,23 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     println!("Using database URL: {}", database_url);
 
-    let frontend_origin = env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let frontend_origin =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
     // Enable CORS for all origins
     let cors_layer = CorsLayer::new()
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
-        .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE, header::CONTENT_LENGTH, header::ACCEPT])
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+            header::CONTENT_LENGTH,
+            header::ACCEPT,
+        ])
         .allow_origin(frontend_origin.parse::<axum::http::HeaderValue>().unwrap())
         .allow_credentials(true);
 

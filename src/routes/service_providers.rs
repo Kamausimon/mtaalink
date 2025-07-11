@@ -11,8 +11,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use validator::Validate;
 use sqlx::{Postgres, Transaction};
+use validator::Validate;
 
 pub fn service_providers_routes(pool: PgPool) -> Router {
     Router::new()
@@ -24,7 +24,7 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
         .with_state(pool.clone())
 }
 
-#[derive(Deserialize, Debug, Validate,sqlx::FromRow)]
+#[derive(Deserialize, Debug, Validate, sqlx::FromRow)]
 pub struct ProviderOnboardRequest {
     #[validate(length(min = 3))]
     pub service_name: String,
@@ -46,9 +46,14 @@ pub async fn onboard_service_provider(
     State(pool): State<PgPool>,
     Json(payload): Json<ProviderOnboardRequest>,
 ) -> impl IntoResponse {
-let mut tx:Transaction<'_,Postgres> = match pool.begin().await {
+    let mut tx: Transaction<'_, Postgres> = match pool.begin().await {
         Ok(tx) => tx,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Database connection error"}))),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database connection error"})),
+            );
+        }
     };
 
     if let Err(e) = payload.validate() {
@@ -92,26 +97,30 @@ let mut tx:Transaction<'_,Postgres> = match pool.begin().await {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": e.to_string()})),
-            );}
+            );
+        }
 
-            //commit the transaction if the update is successful
-           if let Err(e) = tx.commit().await {
+        //commit the transaction if the update is successful
+        if let Err(e) = tx.commit().await {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": e.to_string()})),
-            ); }
+            );
+        }
 
-            match result {
-                Ok(record) => (
-                     StatusCode::CREATED,
-                    Json(json!({"message": "Business onboarded successfully", "provider_id": record.id}))
+        match result {
+            Ok(record) => (
+                StatusCode::CREATED,
+                Json(
+                    json!({"message": "Business onboarded successfully", "provider_id": record.id}),
                 ),
-                Err(e) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": e.to_string()})),
-                ),        
-            }
-    }  else {
+            ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            ),
+        }
+    } else {
         //if the provider does not exist, return an error
         let _ = tx.rollback().await;
         return (
@@ -119,9 +128,6 @@ let mut tx:Transaction<'_,Postgres> = match pool.begin().await {
             Json(json!({"error": "Provider does not exist, please use the onboarding route"})),
         );
     }
-
-    
-
 }
 
 #[derive(Deserialize, Debug)]

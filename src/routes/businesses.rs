@@ -10,8 +10,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
+use sqlx::{Postgres, Transaction};
 use validator::Validate;
-use sqlx::{Transaction, Postgres};
 
 pub fn businesses_routes(pool: PgPool) -> Router {
     Router::new()
@@ -33,7 +33,7 @@ pub struct BusinessOnboardRequest {
     pub business_name: String,
     #[validate(length(min = 10))]
     pub description: String,
-    pub category: Option<String>,//category to be handled by a different handler
+    pub category: Option<String>, //category to be handled by a different handler
     pub location: Option<String>, //location to be handled by a different handler
     pub license_number: String,
     #[validate(length(min = 11))]
@@ -51,12 +51,16 @@ pub async fn onboard_business(
     State(pool): State<PgPool>,
     Json(payload): Json<BusinessOnboardRequest>,
 ) -> impl IntoResponse {
-    let mut tx:Transaction<'_, Postgres> = match pool.begin().await {
+    let mut tx: Transaction<'_, Postgres> = match pool.begin().await {
         Ok(tx) => tx,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
     };
 
- 
     if let Err(e) = payload.validate() {
         return (
             StatusCode::BAD_REQUEST,
@@ -72,72 +76,74 @@ pub async fn onboard_business(
     .await
     .unwrap();
 
-    println!("Query result for user_id {}: exists = {:?}", user_id, exists);
+    println!(
+        "Query result for user_id {}: exists = {:?}",
+        user_id, exists
+    );
 
-//if the business exists proceed with the update
-if let Some(_) = exists {
-   //if business exists continue to update
-    let result = sqlx::query!(
-       "UPDATE businesses SET (
+    //if the business exists proceed with the update
+    if let Some(_) = exists {
+        //if business exists continue to update
+        let result = sqlx::query!(
+            "UPDATE businesses SET (
         business_name, description, category, location, license_number,
         krapin, phone_number, email, website, whatsapp
         ) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         WHERE user_id = $11
         RETURNING id",
-        payload.business_name,
-        payload.description,
-        payload.category,
-        payload.location,
-        payload.license_number,
-        payload.krapin,
-        payload.phone_number,
-        payload.email,
-        payload.website,
-        payload.whatsapp,
-        user_id.parse::<i32>().unwrap()
-    )
-    .fetch_one(&mut *tx)
-    .await;
-    println!("Update result: {:?}", result);
-    
+            payload.business_name,
+            payload.description,
+            payload.category,
+            payload.location,
+            payload.license_number,
+            payload.krapin,
+            payload.phone_number,
+            payload.email,
+            payload.website,
+            payload.whatsapp,
+            user_id.parse::<i32>().unwrap()
+        )
+        .fetch_one(&mut *tx)
+        .await;
+        println!("Update result: {:?}", result);
 
-    //if the update fails, rollback the transaction
-    if let Err(e) = result {
+        //if the update fails, rollback the transaction
+        if let Err(e) = result {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+
+        //commit the transaction
+        if let Err(e) = tx.commit().await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+
+        match result {
+            Ok(record) => (
+                StatusCode::CREATED,
+                Json(
+                    json!({ "message": "Business onboarded successfully", "business_id": record.id }),
+                ),
+            ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            ),
+        }
+    } else {
+        //return an error if the business does not exist
         let _ = tx.rollback().await;
         return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message": "Business not found, please use the onboard endpoint"})),
         );
     }
-
-    //commit the transaction
-    if let Err(e) = tx.commit().await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        );
-    }
-
-    match result {
-        Ok(record) => (
-            StatusCode::CREATED,
-            Json(json!({ "message": "Business onboarded successfully", "business_id": record.id })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        ),
-    }
-} else {
-    //return an error if the business does not exist
-     let _ = tx.rollback().await;
-    return (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"message": "Business not found, please use the onboard endpoint"})),
-    );
-}
-
-
 }
 
 //filter business by category, name and location
@@ -166,7 +172,6 @@ pub async fn list_businesses(
     Query(params): Query<BusinessQuery>,
     CurrentUser { user_id }: CurrentUser,
 ) -> impl IntoResponse {
-
     //search for the user role
     let user_role_result = sqlx::query_scalar!(
         "SELECT role FROM users WHERE id = $1",
@@ -175,29 +180,28 @@ pub async fn list_businesses(
     .fetch_one(&pool)
     .await;
 
- match user_role_result {
-    Ok(Some(role))=> {
-        if role == "business" || role == "provider" {
+    match user_role_result {
+        Ok(Some(role)) => {
+            if role == "business" || role == "provider" {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({"error": "You are not authorized to view this resource"})),
+                );
+            }
+        }
+        Ok(None) => {
             return (
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "You are not authorized to view this resource"})),
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
             );
         }
-    },
-    Ok(None) => {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"})),
-        );
-    },
-    Err(e) => {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        );
-    },
- }
-  
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+    }
 
     let mut query = String::from(
         r#"
@@ -238,19 +242,17 @@ pub async fn list_businesses(
 
     match q.fetch_all(&pool).await {
         Ok(bindings) => (
-             StatusCode::OK,
-             Json(json!({
-            "message": "Businesses fetched successfully",
-            "businesses": bindings,
+            StatusCode::OK,
+            Json(json!({
+                "message": "Businesses fetched successfully",
+                "businesses": bindings,
 
-        })),
+            })),
         ),
-        Err(e) => {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-        },
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
     }
 }
 
@@ -271,8 +273,8 @@ pub async fn update_business_profile(
     State(pool): State<PgPool>,
     Json(payload): Json<BusinessUpdateRequest>,
 ) -> impl IntoResponse {
-  //search for the user role
-  let user_role_match = sqlx::query_scalar!(
+    //search for the user role
+    let user_role_match = sqlx::query_scalar!(
         "SELECT role FROM users WHERE id = $1",
         user_id.parse::<i32>().unwrap()
     )
@@ -416,7 +418,6 @@ pub async fn upload_business_logo(
             )
             .execute(&pool)
             .await;
-
 
             match result {
                 Ok(_) => (

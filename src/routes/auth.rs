@@ -15,9 +15,10 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgPool;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 use validator::Validate;
-use sqlx::{Transaction, Postgres};
+
 
 pub fn auth_routes(pool: PgPool) -> Router {
     Router::new()
@@ -51,7 +52,7 @@ pub struct RegisterInput {
 
 fn normalize_email(email: &str) -> String {
     // Convert to lowercase and trim whitespace
-    let  normalized = email.trim().to_lowercase();
+    let normalized = email.trim().to_lowercase();
     
     // Optional: Special handling for Gmail addresses
     if let Some(at_pos) = normalized.find('@') {
@@ -81,7 +82,7 @@ pub async fn register(
     //confirm that passwords match
     payload.email = normalize_email(&payload.email);
     payload.username = normalize_username(&payload.username);
-  let mut tx:Transaction<'_, Postgres> = match pool.begin().await {
+    let mut tx: Transaction<'_, Postgres> = match pool.begin().await {
         Ok(tx) => tx,
         Err(_) => {
             return (
@@ -168,15 +169,37 @@ pub async fn register(
                 .await
         }
 
-        "provider" => {
-            sqlx::query!(
-                "INSERT INTO providers (user_id, service_description) VALUES ($1, $2)",
-                user_id,
-                payload.service_description
-            )
-            .execute(&mut *tx)
-            .await
-        }
+    "provider" => {
+    if payload.service_description.is_none()
+        || payload
+            .service_description
+            .as_ref()
+            .map_or(true, |s| s.trim().is_empty())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message": "Service description is required for provider role"})),
+        );
+    }
+
+    let service_description = payload.service_description.clone().unwrap();
+
+    let result = sqlx::query!(
+        "INSERT INTO providers (user_id, service_description) VALUES ($1, $2)",
+        user_id,
+        service_description
+    )
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = &result {
+        eprintln!("🚨 Provider insert failed: {}", e);
+    }
+
+    result
+}
+
+
         "business" => {
  //ensure business_name is provided
        if payload.business_name.is_none() {
@@ -204,7 +227,7 @@ pub async fn register(
 
     //update the user role in the users table
     let role_update_result = sqlx::query!(
-        "UPDATE users SET role = $1 WHERE id = $2",
+        "UPDATE users SET role = $1::text WHERE id = $2",
         payload.role,
         user_id
     )
@@ -212,13 +235,18 @@ pub async fn register(
     .await;
 
     //if there is an error updating the user role, rollback the transaction
-    if let Err(e) = role_update_result {
-        let _ = tx.rollback().await;
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": "Error updating user role", "error": e.to_string()})),
-        );
-    }   
+if let Err(e) = role_update_result {
+    eprintln!("Role update error for role '{}': {:?}", payload.role, e);
+    let _ = tx.rollback().await;
+    return (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "message": "Error updating user role", 
+            "error": e.to_string(),
+            "role": payload.role
+        })),
+    );
+}
 
  //if the role insertion fails, rollback the transaction
   if let Err(e) = role_result {
