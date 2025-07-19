@@ -28,6 +28,7 @@ use routes::posts::posts_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
 use utils::attachments::attachments_routes;
+use routes::services::services_routes;
 
 #[tokio::main]
 async fn main() {
@@ -82,6 +83,7 @@ async fn main() {
         .nest("/locations", locations_routes(pool.clone())) // Mount the locations routes
         .nest("/posts", posts_routes(pool.clone())) // Mount the posts routes
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
+        .nest("/services", services_routes(pool.clone())) // Mount the services routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(cors_layer) // ✅ This enables CORS for all origins
         .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
