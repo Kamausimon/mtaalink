@@ -249,6 +249,61 @@ pub async fn edit_service(
     )
 }
 //enable deleting services
+#[derive(Deserialize, Serialize)]
+pub struct DeleteServiceParams {
+    pub service_id: i32,
+}
+pub async fn delete_service(
+ State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<DeleteServiceParams>,
+)-> impl IntoResponse {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to start transaction"})));
+        }
+    };
+
+    //check if the user is a provider
+    let provider_results = sqlx::query!(
+        "SELECT id FROM service_providers WHERE user_id = $1",
+        user_id.parse::<i32>().unwrap()
+    ).fetch_optional(&mut *tx).await;
+
+    match provider_results {
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({"message": "You are not authorized to delete this service"})));
+        },
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to fetch provider"})));
+        }
+    };
+
+    //delete the service
+    let delete_result = sqlx::query!("DELETE FROM services WHERE id = $1 RETURNING id", payload.service_id)
+        .fetch_one(&mut *tx)
+        .await;
+
+    match delete_result {
+        Ok(record) => {
+            tx.commit().await.expect("Failed to commit transaction");
+            (
+                StatusCode::OK,
+                Json(json!({"message": "Service deleted successfully", "service_id": record.id})),
+            )
+        }
+        Err(e) => {
+            eprintln!("Failed to delete service: {}", e);
+            tx.rollback().await.expect("Failed to rollback transaction");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to delete service: {}", e)})),
+            )
+        }
+    }
+}
 
 //upload attachments to the service
 pub async fn upload_service_attachments (
