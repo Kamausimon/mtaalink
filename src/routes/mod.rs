@@ -11,3 +11,4 @@ pub mod messages;
 pub mod posts;
 pub mod reviews;
 pub mod service_providers;
+pub mod services;

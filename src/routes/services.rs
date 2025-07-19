@@ -21,6 +21,7 @@ use crate::extractors::current_user::CurrentUser;
 pub fn services_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/createService", post(create_service))
+        .route("/getServices", get(get_services))
         .route("/deleteService", post(delete_service))
         .route("/updateService", post(edit_service))
         .route("/:service_id/attachments", post(upload_attachments))
@@ -157,6 +158,41 @@ pub  async fn create_service(
         "upload_attachments_ulr": format!("/attachments/uploadAttachments?provider_id={}&service_id={}", provider_id, service_id)
     }))
 )
+}
+
+#[derive(Deserialize, Serialize,sqlx::FromRow)]
+pub struct GetServicesParams {
+    pub provider_id: Option<i32>,
+}
+
+pub async fn get_services(
+    State(pool): State<PgPool>,
+    Query(params): Query<GetServicesParams>,
+) -> impl IntoResponse {
+    let provider_id = params.provider_id;
+
+    let mut query = String::from("SELECT * FROM services");
+    let mut query_params: Vec<&(dyn sqlx::Encode<'_, Postgres> + sqlx::Type<Postgres>)> = Vec::new();
+
+    if let Some(id) = provider_id {
+        query.push_str(" WHERE provider_id = $1");
+        query_params.push(&id);
+    }
+
+    let services_result = sqlx::query_as::<_, Service>(&query)
+        .bind(query_params)
+        .fetch_all(&pool)
+        .await;
+
+    match services_result {
+        Ok(services) => {
+            StatusCode::OK,
+            Json(json!({"services": services}))
+        },
+        Err(_) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to fetch services"})))
+        }
+    }
 }
 
 //enable providers to edit their services and update them
