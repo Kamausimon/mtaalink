@@ -19,6 +19,7 @@ pub fn messages_routes(pool: PgPool) -> Router {
         .route("/getMessages", get(get_messages))
         .route("/markMessagesAsRead", post(mark_messages_as_read))
         .route("/unreadMessagesCount", get(get_unread_messages_count))
+        .route("/conversations", get(get_conversations))
         .with_state(pool)
 }
 
@@ -341,6 +342,120 @@ pub async fn get_unread_messages_count(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "message": "Failed to fetch unread messages count" })),
+            )
+        }
+    }
+}
+
+#[derive(Serialize,sqlx::FromRow, Debug,Deserialize)]
+pub struct ConversationResponse {
+    pub participant_id: i32,
+    pub participant_name: String,
+    pub participant_avatar: Option<String>,
+    pub last_message: Option<String>,
+    pub last_message_time: Option<NaiveDateTime>,
+    pub unread_count: i64,
+    pub user_type:String //can be be client, provider, business
+}
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct ConversationsQuery{
+    pub target_type: String,
+}
+
+pub async fn get_conversations(
+    State(pool): State<PgPool>, 
+    CurrentUser { user_id }: CurrentUser,
+    Query(params): Query<ConversationsQuery>,
+)->impl IntoResponse{
+    let target_type = params.target_type.to_lowercase();
+    let user_id = user_id.parse::<i32>().unwrap();
+
+    //get the identity of the user
+    let entity_id_id = match get_target_id(&pool, user_id, &target_type ).await {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "message": "You are not allowed to view these conversations" })),
+            );
+        }
+    }
+
+    //get all the unique users this user has had conversations with
+    let result = sqlx::query_as!(
+        ConversationResponse,
+        r#"
+         WITH conversation_partners AS (
+         --find users who sent messages to this entity
+          SELECT 
+             DISTINCT sender_id AS participant_id,
+                'sent' AS direction
+           FROM messages
+           WHERE receiver_id = $1 AND target_type = $2
+           
+            UNION
+            --find users who received messages from this entity
+           SELECT 
+                DISTINCT receiver_id AS participant_id,
+                    'received' AS direction
+              FROM messages
+                WHERE sender_id = $1 AND target_type = $2 
+         ),
+         last_messages AS (
+          --get the last message for each conversation
+          SELECT 
+              CASE
+                 WHEN sender_id = $1 THEN receiver_id
+                 ELSE sender_id
+                 END AS participant_id,
+                 content AS last_message,
+                 created_at AS last_message_time
+                 ROW_NUMBER() OVER (PARTITION BY
+                    CASE
+                        WHEN sender_id = $1 THEN receiver_id
+                        ELSE sender_id
+                    END ORDER BY created_at DESC) AS rn
+            FROM messages
+            WHERE (sender_id = $1 AND target_type = $2) OR (receiver_id = $1 AND target_type = $2)
+         ),
+         unread_counts AS (
+         --count unread messages for each conversation
+         SELECT sender_id AS participant_id, COUNT(*) AS unread_count
+         FROM messages
+            WHERE receiver_id = $1 AND is_read = FALSE AND target_type = $2
+            GROUP BY sender_id
+            )
+
+            --join everything together
+            SELECT 
+              cp.participant_id,
+                u.name AS participant_name,
+                u.avatar AS participant_avatar,
+                lm.last_message,
+                lm.last_message_time,
+                COALESCE(uc.unread_count, 0) AS unread_count,
+                COALESCE(
+                (SELECT user_type FROM users WHERE id = cp.participant_id),
+                'unknown'
+                ) AS user_type
+            FROM conversation_partners cp
+            LEFT JOIN users u ON cp.participant_id = u.id
+            LEFT JOIN last_messages lm ON cp.participant_id = lm.participant_id AND lm.rn = 1
+            LEFT JOIN unread_counts uc ON cp.participant_id = uc.participant_id
+         ORDER BY lm.last_message_time DESC NULLS LAST
+        "#,
+        entity_id,
+        target_type
+    ).fetch_all(&pool).await;
+
+    match result {
+        Ok(conversations) => (StatusCode::OK, Json(json!({ "conversations": conversations }))),
+        Err(e) => {
+            eprintln!("Error fetching conversations: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": "Failed to fetch conversations" })),
             )
         }
     }
