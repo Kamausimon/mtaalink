@@ -28,7 +28,8 @@ pub struct Booking {
     pub client_id: i32,
     pub target_type: String,                   // e.g., "business", "provider"
     pub target_id: i32,                        // e.g., business_id or provider_id
-    pub branch_id: Option<i32>,                // e.g., branch_id if applicable
+    pub branch_id: Option<i32>,
+    pub service_id: Option<i32>                // e.g., branch_id if applicable
     pub service_description: String,           // e.g., "haircut", "plumbing service"
     pub scheduled_time: chrono::NaiveDateTime, // e.g., "2023-10-01 14:00:00"
 }
@@ -51,8 +52,19 @@ pub async fn create_booking(
     let client_id = user_id; // Assuming the booking is made by the client themselves
     let target_id = payload.target_id;
     let branch_id = payload.branch_id;
+    let service_id = payload.service_id;
     let service_description = payload.service_description.trim().to_string();
     let scheduled_time = payload.scheduled_time;
+    let service_duration = if let Some(service_id) = service_id{
+        match sqlx::query!(
+            "SELECT duration FROM services WHERE id  = $1", service_id
+        ).fetch_optional(&pool).await{
+            Ok(Some(service)) => service.duration,
+            _=>60, // Default duration if service not found
+        }
+    } else {
+        60 // Default duration if no service_id is provided
+    }
 
     if target_id <= 0 {
         return (
@@ -125,18 +137,45 @@ pub async fn create_booking(
         }
     }
 
+    //check if the selected service exists 
+    let existing_service_id_exists = sqlx::query!(
+        "SELECT id FROM services WHERE id = $1 AND target_type = $2 AND target_id = $3",
+        service_id,
+        target_type,
+        target_id   
+    ).fetch_optional(&pool).await;  
+
+    match existing_service_id_exists {
+        Ok(Some(_)) => {}, // Service exists, proceed
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Service ID does not exist"})),
+            );
+        }
+        Err(e) => {
+            eprintln!("Error checking service existence: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to check service existence"})),
+            );
+        }
+    }
+
     let result = sqlx::query!(
         r#"
-        INSERT INTO bookings (client_id, target_type, target_id, branch_id, service_description, scheduled_time, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO bookings (client_id, target_type, target_id, branch_id,service_id, service_description, scheduled_time, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9)
         RETURNING id
         "#,
         client_id,
         target_type,
         target_id,
         branch_id,
+        service_id,
         service_description,
         scheduled_time,
+        service_duration, // Assuming service_duration is in minutes
         "pending"
     )
     .fetch_one(&pool)
@@ -239,19 +278,45 @@ pub async fn get_bookings_received(
     }
 
     let result = sqlx::query_as::<_, Booking>(
-        "SELECT id, client_id, target_type, target_id, branch_id, service_description, scheduled_time, status
-         FROM bookings
-         WHERE target_type = $1 AND target_id = $2 AND status = $3
-         ORDER BY scheduled_time DESC"
+    r#"
+    SELECT b.id, b.client_id, b.target_type, b.branch_id, b.service_id,b.service_description,b.scheduled_time,
+    b.status,b.created_at, u.name as client_name, u.email as client_email,u.phone as client_phone
+    CASE
+        WHEN b.service_id IS NOT NULL THEN s.title
+        ELSE b.service_description
+        END AS service_name,
+        FROM bookings b
+        LEFT JOIN users u ON b.client_id = u.id
+        LEFT JOIN services s ON b.service_id = s.id
+        WHERE b.target_type = $1 AND b.target_id = $2 AND b.status = $3
+        ORDER BY b.scheduled_time DESC
+        "#
+        target_type
+        target_id
+        status
     )
-    .bind(target_type)
-    .bind(target_id)
-    .bind(status)
     .fetch_all(&pool)
     .await;
 
     match result {
-        Ok(bookings) => (StatusCode::OK, Json(json!({ "bookings": bookings }))),
+        Ok(rows) => {
+            let bookings: Vec<BookingResponse> = rows.into_iter().map(|row| BookingResponse {
+                id: row.id,
+                client_id: row.client_id,
+                target_type: row.target_type,
+                branch_id: row.branch_id,
+                service_id: row.service_id,
+                service_description: row.service_description,
+                scheduled_time: row.scheduled_time,
+                status: row.status,
+                duration: row.duration.unwrap_or(60), // Default to 60 mins if not specified
+                created_at: row.created_at,
+                client_name: row.client_name,
+                client_email: row.client_email,
+                client_phone: row.client_phone,
+                service_name: row.service_name.unwrap_or_default(),
+            }).collect();
+        }
         Err(e) => {
             eprintln!("Error fetching the bookings: {}", e);
             (
