@@ -21,6 +21,7 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
         .route("/updateProfile", post(update_provider_profile))
         .route("/uploadProfilePhoto", post(upload_provider_profile_photo))
         .route("/uploadCoverPhoto", post(upload_provider_cover_photo))
+        .route("/getProviderData", get(get_provider_data))
         .with_state(pool.clone())
 }
 
@@ -380,4 +381,75 @@ pub async fn upload_provider_cover_photo(
             Json(json!({"error": e.to_string()})),
         ),
     }
+}
+
+#[derive(Serialize, Debug, sqlx::FromRow)]
+pub struct ProviderData {
+    id: i32,
+    service_name: String,
+    service_description: String,
+    category: Option<String>,
+    location: Option<String>,
+    phone_number: Option<String>,
+    email: String,
+    website: Option<String>,
+    whatsapp: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetProviderDataQuery {
+    pub provider_id: String,
+}
+
+pub async fn get_provider_data (
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Query(params): Query<GetProviderDataQuery>,
+)-> impl IntoResponse {
+     let user_id = user_id.parse::<i32>().unwrap_or(0);
+    //check if the provider_id in the query matches the current user
+        if params.provider_id.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Provider ID is required"})),
+            );
+        }
+     //check if the user_id in the query matches the current user
+        if params.provider_id != user_id.to_string() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "You are not authorized to access this data"})),
+            );
+        }
+
+        //check if the user is a provider 
+       let provider_results = sqlx::query!(
+          "SELECT * FROM providers WHERE user_id = $1",
+            user_id
+       ).fetch_optional(&pool).await;
+
+        match provider_results {
+            Ok(Some(provider)) => {
+                let provider_data = ProviderData {
+                    id: provider.id,
+                    service_name: provider.service_name,
+                    service_description: provider.service_description,
+                    category: provider.category,
+                    location: provider.location,
+                    phone_number: provider.phone_number,
+                    email: provider.email,
+                    website: provider.website,
+                    whatsapp: provider.whatsapp,
+                };
+                Json(json!({"provider_data": provider_data}))
+            }
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Provider not found"})),
+            ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            ),
+        }
 }
