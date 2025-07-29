@@ -22,6 +22,9 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
         .route("/uploadProfilePhoto", post(upload_provider_profile_photo))
         .route("/uploadCoverPhoto", post(upload_provider_cover_photo))
         .route("/getProviderData", get(get_provider_data))
+        .route("/updateAvailability", post(update_provider_availability))
+        .route("/updateBulkAvailability", post(update_bulk_availability))
+        .route("/getAvailability", get(get_provider_availability))
         .with_state(pool.clone())
 }
 
@@ -452,4 +455,333 @@ pub async fn get_provider_data (
                 Json(json!({"error": e.to_string()})),
             ),
         }
+}
+
+#[derive(Deserialize, Debug, Serialize, sqlx::FromRow)]
+pub struct ProviderAvailabilty{
+    pub provider_id: i32,
+    pub is_available: bool,
+    pub day : String,
+    pub start_time: String,
+    pub end_time: String,
+}
+
+
+
+pub async fn update_provider_availability(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<ProviderAvailabilty>,
+)-> impl IntoResponse {
+    //validate the payload 
+    if payload.provider_id != user_id.parse::<i32>().unwrap() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You are not authorized to update this provider's availability"})),
+        );
+    }
+
+    //check if the provider exists
+    let provider_exists = sqlx::query!(
+        "SELECT 1 FROM providers WHERE id = $1",
+        payload.provider_id
+    )
+    .fetch_optional(&pool)
+    .await;
+
+    match provider_exists{
+        Ok(Some(_))=> {},
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Provider not found"})),
+            );
+        }
+        Err(e)=> {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+    }
+
+    //check if the availability already exists
+    let availability_exists = sqlx::query!(
+        "SELECT 1 FROM provider_availability WHERE provider_id = $1 AND day = $2",
+        payload.provider_id,
+        payload.day
+    ).fetch_optional(&pool).await;
+
+    //if it exists update it if not create it 
+    match availability_exists {
+        Ok(Some(_)) => {
+            //update the availability
+            let update_result = sqlx::query!(
+                "UPDATE provider_availability SET is_available = $1, start_time = $2, end_time = $3 WHERE provider_id = $4 AND day = $5",
+                payload.is_available,
+                payload.start_time,
+                payload.end_time,
+                payload.provider_id,
+                payload.day
+            )
+            .execute(&pool)
+            .await;
+
+            match update_result {
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(json!({"message": "Availability updated successfully"})),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),
+            }
+        }
+        Ok(None) => {
+            //insert the availability
+            let insert_result = sqlx::query!(
+                "INSERT INTO provider_availability (provider_id, is_available, day, start_time, end_time) VALUES ($1, $2, $3, $4, $5)",
+                payload.provider_id,
+                payload.is_available,
+                payload.day,
+                payload.start_time,
+                payload.end_time
+            )
+            .execute(&pool)
+            .await;
+
+            match insert_result {
+                Ok(_) => (
+                    StatusCode::CREATED,
+                    Json(json!({"message": "Availability created successfully"})),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                ),
+            }
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
+    }
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct AvailabilityItem {
+    pub id: Option<i32>,  // Optional for new entries
+    pub day: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub is_available: bool,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct BulkAvailabilityUpdate {
+    pub availability: Vec<AvailabilityItem>,
+}
+
+pub async fn update_bulk_availability(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<BulkAvailabilityUpdate>,
+) -> impl IntoResponse {
+    // Get provider ID from user_id
+    let provider_result = sqlx::query!(
+        "SELECT id FROM providers WHERE user_id = $1",
+        user_id.parse::<i32>().unwrap()
+    )
+    .fetch_optional(&pool)
+    .await;
+
+    let provider_id = match provider_result {
+        Ok(Some(provider)) => provider.id,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Provider not found"})),
+            )
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        }
+    };
+
+    // Start a transaction for bulk operations
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            );
+        }
+    };
+
+    // Process each availability item
+    let mut updated_count = 0;
+    let mut created_count = 0;
+
+    for item in payload.availability {
+        // For each day, either update or insert
+        let availability_exists = sqlx::query!(
+            "SELECT id FROM provider_availability WHERE provider_id = $1 AND day = $2",
+            provider_id,
+            item.day
+        )
+        .fetch_optional(&mut *tx)
+        .await;
+
+        match availability_exists {
+            Ok(Some(record)) => {
+                // Update existing record
+                let update_result = sqlx::query!(
+                    "UPDATE provider_availability SET is_available = $1, start_time = $2, end_time = $3 
+                     WHERE id = $4 AND provider_id = $5",
+                    item.is_available,
+                    item.start_time,
+                    item.end_time,
+                    record.id,
+                    provider_id
+                )
+                .execute(&mut *tx)
+                .await;
+
+                if let Err(e) = update_result {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to update {}: {}", item.day, e.to_string())})),
+                    );
+                }
+                
+                updated_count += 1;
+            }
+            Ok(None) => {
+                // Insert new record
+                let insert_result = sqlx::query!(
+                    "INSERT INTO provider_availability (provider_id, is_available, day, start_time, end_time) 
+                     VALUES ($1, $2, $3, $4, $5)",
+                    provider_id,
+                    item.is_available,
+                    item.day,
+                    item.start_time,
+                    item.end_time
+                )
+                .execute(&mut *tx)
+                .await;
+
+                if let Err(e) = insert_result {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to create {}: {}", item.day, e.to_string())})),
+                    );
+                }
+                
+                created_count += 1;
+            }
+            Err(e) => {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                );
+            }
+        }
+    }
+
+    // Commit the transaction
+    if let Err(e) = tx.commit().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "message": "Availability updated successfully",
+            "updated": updated_count,
+            "created": created_count
+        })),
+    )
+}
+
+pub async fn get_provider_availability(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+) -> impl IntoResponse {
+    // Get provider ID from user_id
+    let provider_result = sqlx::query!(
+        "SELECT id FROM providers WHERE user_id = $1",
+        user_id.parse::<i32>().unwrap()
+    )
+    .fetch_optional(&pool)
+    .await;
+
+    let provider_id = match provider_result {
+        Ok(Some(provider)) => provider.id,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Provider not found"})),
+            )
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        }
+    };
+
+    // Fetch availability records
+    let availability_result = sqlx::query!(
+        "SELECT id, day, start_time, end_time, is_available 
+         FROM provider_availability 
+         WHERE provider_id = $1
+         ORDER BY CASE 
+            WHEN day = 'monday' THEN 1
+            WHEN day = 'tuesday' THEN 2
+            WHEN day = 'wednesday' THEN 3
+            WHEN day = 'thursday' THEN 4
+            WHEN day = 'friday' THEN 5
+            WHEN day = 'saturday' THEN 6
+            WHEN day = 'sunday' THEN 7
+            ELSE 8
+         END",
+        provider_id
+    )
+    .fetch_all(&pool)
+    .await;
+
+    match availability_result {
+        Ok(records) => {
+            let availability = records
+                .into_iter()
+                .map(|record| {
+                    json!({
+                        "id": record.id,
+                        "day": record.day,
+                        "start_time": record.start_time,
+                        "end_time": record.end_time,
+                        "is_available": record.is_available
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            (StatusCode::OK, Json(json!({ "availability": availability })))
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        ),
+    }
 }
