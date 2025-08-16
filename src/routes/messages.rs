@@ -380,7 +380,7 @@ pub async fn get_conversations(
                 Json(json!({ "message": "You are not allowed to view these conversations" })),
             );
         }
-    }
+    };
 
     //get all the unique users this user has had conversations with
     let result = sqlx::query_as!(
