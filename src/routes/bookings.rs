@@ -25,6 +25,7 @@ pub fn booking_routes(pool: PgPool) -> Router {
 
 #[derive(Serialize, Deserialize, sqlx::FromRow, Debug)]
 pub struct Booking {
+    pub id: i32,
     pub client_id: i32,
     pub target_type: String,                   // e.g., "business", "provider"
     pub target_id: i32,                        // e.g., business_id or provider_id
@@ -32,6 +33,10 @@ pub struct Booking {
     pub service_id: Option<i32>,                // e.g., branch_id if applicable
     pub service_description: String,           // e.g., "haircut", "plumbing service"
     pub scheduled_time: chrono::NaiveDateTime, // e.g., "2023-10-01 14:00:00"
+    pub status: String,
+    pub duration: Option<i32>,
+    pub created_at: Option<NaiveDateTime>,
+    pub updated_at: Option<NaiveDateTime>,
 }
 
 pub async fn create_booking(
@@ -138,12 +143,17 @@ pub async fn create_booking(
     }
 
     //check if the selected service exists 
-    let existing_service_id_exists = sqlx::query!(
+  //check if the selected service exists
+let existing_service_id_exists = if let Some(service_id_val) = service_id {
+    sqlx::query!(
         "SELECT id FROM services WHERE id = $1 AND target_type = $2 AND target_id = $3",
-        service_id,
+        service_id_val,
         target_type,
         target_id   
-    ).fetch_optional(&pool).await;  
+    ).fetch_optional(&pool).await
+} else {
+    Ok(Some(sqlx::postgres::PgRow::default()))  // Skip check if no service_id provided
+};
 
     match existing_service_id_exists {
         Ok(Some(_)) => {}, // Service exists, proceed
@@ -162,24 +172,24 @@ pub async fn create_booking(
         }
     }
 
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO bookings (client_id, target_type, target_id, branch_id,service_id, service_description, scheduled_time, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9)
-        RETURNING id
-        "#,
-        client_id,
-        target_type,
-        target_id,
-        branch_id,
-        service_id,
-        service_description,
-        scheduled_time,
-        service_duration, // Assuming service_duration is in minutes
-        "pending"
-    )
-    .fetch_one(&pool)
-    .await;
+let result = sqlx::query!(
+    r#"
+    INSERT INTO bookings (client_id, target_type, target_id, branch_id, service_id, service_description, scheduled_time, duration, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING id
+    "#,
+    client_id,
+    target_type,
+    target_id,
+    branch_id,
+    service_id,
+    service_description,
+    scheduled_time,
+    service_duration, // This is your 8th parameter
+    "pending"         // This is your 9th parameter
+)
+.fetch_one(&pool)
+.await;
 
     match result {
         Ok(record) => (
@@ -253,6 +263,25 @@ pub struct BookingsQueryByReceiver {
     status: String, //can be pending, confirmed, cancelled or completed
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BookingResponse {
+    pub id: i32,
+    pub client_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub branch_id: Option<i32>,
+    pub service_id: Option<i32>,
+    pub service_description: String,
+    pub scheduled_time: NaiveDateTime,
+    pub status: String,
+    pub duration: i32,
+    pub created_at: Option<NaiveDateTime>,
+    pub client_name: String,
+    pub client_email: String,
+    pub client_phone: String,
+    pub service_name: String,
+}
+
 pub async fn get_bookings_received(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
@@ -277,26 +306,27 @@ pub async fn get_bookings_received(
         );
     }
 
-    let result = sqlx::query_as::<_, Booking>(
+let result = sqlx::query!(
     r#"
-    SELECT b.id, b.client_id, b.target_type, b.branch_id, b.service_id,b.service_description,b.scheduled_time,
-    b.status,b.created_at, u.name as client_name, u.email as client_email,u.phone as client_phone
-    CASE
-        WHEN b.service_id IS NOT NULL THEN s.title
-        ELSE b.service_description
-        END AS service_name,
-        FROM bookings b
-        LEFT JOIN users u ON b.client_id = u.id
-        LEFT JOIN services s ON b.service_id = s.id
-        WHERE b.target_type = $1 AND b.target_id = $2 AND b.status = $3
-        ORDER BY b.scheduled_time DESC
-        "#,
-        target_type,
-        target_id,
-        status
-    )
-    .fetch_all(&pool)
-    .await;
+    SELECT b.id, b.client_id, b.target_type, b.target_id, b.branch_id, b.service_id, 
+           b.service_description, b.scheduled_time, b.status, b.duration, b.created_at, 
+           u.name as client_name, u.email as client_email, u.phone as client_phone,
+           CASE
+               WHEN b.service_id IS NOT NULL THEN s.title
+               ELSE b.service_description
+           END AS service_name
+    FROM bookings b
+    LEFT JOIN users u ON b.client_id = u.id
+    LEFT JOIN services s ON b.service_id = s.id
+    WHERE b.target_type = $1 AND b.target_id = $2 AND b.status = $3
+    ORDER BY b.scheduled_time DESC
+    "#,
+    target_type,
+    target_id,
+    status
+)
+.fetch_all(&pool)
+.await;
 
     match result {
         Ok(rows) => {
@@ -304,6 +334,7 @@ pub async fn get_bookings_received(
                 id: row.id,
                 client_id: row.client_id,
                 target_type: row.target_type,
+                target_id: row.target_id,
                 branch_id: row.branch_id,
                 service_id: row.service_id,
                 service_description: row.service_description,
@@ -316,6 +347,10 @@ pub async fn get_bookings_received(
                 client_phone: row.client_phone,
                 service_name: row.service_name.unwrap_or_default(),
             }).collect();
+            (
+                StatusCode::OK,
+                Json(json!({"bookings": bookings})),
+            )
         }
         Err(e) => {
             eprintln!("Error fetching the bookings: {}", e);
