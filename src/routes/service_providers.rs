@@ -389,12 +389,12 @@ pub async fn upload_provider_cover_photo(
 #[derive(Serialize, Debug, sqlx::FromRow)]
 pub struct ProviderData {
     id: i32,
-    service_name: String,
-    service_description: String,
+    service_name: Option<String>,  // Changed from String to Option<String>
+    service_description: Option<String>, // This should also be optional for consistency
     category: Option<String>,
     location: Option<String>,
     phone_number: Option<String>,
-    email: String,
+    email: Option<String>,  // Make email optional too if it might be
     website: Option<String>,
     whatsapp: Option<String>,
 }
@@ -444,7 +444,10 @@ pub async fn get_provider_data (
                     website: provider.website,
                     whatsapp: provider.whatsapp,
                 };
-                Json(json!({"provider_data": provider_data}))
+         (
+            StatusCode::OK,
+                    Json(json!({"provider_data": provider_data}))
+         )
             }
             Ok(None) => (
                 StatusCode::NOT_FOUND,

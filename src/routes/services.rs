@@ -3,7 +3,7 @@ use axum::{
     extract::{Json, Multipart, Query, State,Path},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
+    routing::{get,post},
 };
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -81,40 +81,40 @@ pub  async fn create_service(
     };
 
     //validate the required fields
-    let title = match title {
+    let title = match &payload.title {
         Some(t) if !t.trim().is_empty() => t,
         _ => {
             return (StatusCode::BAD_REQUEST, Json(json!({"message": "Title is required"})));
         }
-    }
+    };
 
     let description = match description {
         Some(d) if !d.trim().is_empty() => d,
         _ => {
             return (StatusCode::BAD_REQUEST, Json(json!({"message": "Description is required"})));
         }
-    }
+    };
 
     let price = match price {
         Some(p) if p > 0.0 => p,
         _ => {
             return (StatusCode::BAD_REQUEST, Json(json!({"message": "Price must be greater than 0"})));
         }
-    }
+    };
 
     let duration = match duration {
         Some(d) if d > 0 => d,
         _ => {
             return (StatusCode::BAD_REQUEST, Json(json!({"message": "Duration must be greater than 0"})));
         }
-    }
+    };
 
-    let catrgory_id = match category_id {
+    let category_id = match category_id {
         Some(c) => c,
         None => {
             return (StatusCode::BAD_REQUEST, Json(json!({"message": "Category ID is required"})));
         }
-    }
+    };
 
     let service_result = sqlx::query!(
         r#"
@@ -128,36 +128,30 @@ pub  async fn create_service(
         price,
         duration,
         category_id,
-        is_active
+        payload.is_active
     )
     .fetch_one(&mut *tx)
     .await;
 
-    let service_id = match service_result {
-        Ok(record) => {
-            StatusCode::OK,
-            Json(json!({"message": "Service created successfully", "service_id": record.id}))
-        },
-        Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to create service"})));
-        }
-    }
-
-    //commit the transaction
-    if let Err(_) => tc.commit().await {
+        //commit the transaction
+    if let Err(_) = tx.commit().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to commit transaction"})));
     }
 
 //return the service if so that the frontend can use that to upload attahcments 
-(
-    StatusCode::CREATED,
-    Json(json!({
-        "message": "Service created successfully",
-        "service_id": service_id,
-        "provider_id": provider_id
-        "upload_attachments_ulr": format!("/attachments/uploadAttachments?provider_id={}&service_id={}", provider_id, service_id)
-    }))
-)
+
+
+    let service_id = match service_result {
+        Ok(record) => {
+          return (  StatusCode::OK,
+            Json(json!({"message": "Service created successfully", "service_id": record.id})))
+        },
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to create service"})));
+        }
+    };
+
+
 }
 
 #[derive(Deserialize, Serialize,sqlx::FromRow)]
@@ -172,11 +166,11 @@ pub async fn get_services(
     let provider_id = params.provider_id;
 
     let mut query = String::from("SELECT * FROM services");
-    let mut query_params: Vec<&(dyn sqlx::Encode<'_, Postgres> + sqlx::Type<Postgres>)> = Vec::new();
+let mut query_params: Vec<Box<dyn sqlx::postgres::PgArgumentBuffer + '_>> = Vec::new();
 
     if let Some(id) = provider_id {
         query.push_str(" WHERE provider_id = $1");
-        query_params.push(&id);
+        query_params.push(Box::new(id));
     }
 
     let services_result = sqlx::query_as::<_, Service>(&query)
@@ -186,8 +180,8 @@ pub async fn get_services(
 
     match services_result {
         Ok(services) => {
-            StatusCode::OK,
-            Json(json!({"services": services}))
+           (  StatusCode::OK,
+            Json(json!({"services": services})))
         },
         Err(_) => {
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to fetch services"})))
@@ -205,6 +199,7 @@ pub struct EditServiceParams {
     pub duration: Option<i32>,
     pub category_id: Option<i32>,
     pub is_active: Option<bool>,
+    pub provider_id: i32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -232,7 +227,7 @@ pub async fn edit_service(
         ).fetch_optional(&mut *tx).await;
 
         match provider_results {
-            Ok(Some(provider)) => provider,
+            Ok(Some(_)) => {},
             Ok(None) => {
                 return (StatusCode::BAD_REQUEST, Json(json!({"message": "You are not authorized to edit this service"})));
             },
@@ -265,17 +260,14 @@ pub async fn edit_service(
      ).fetch_one(&mut *tx).await;
 
     let service_id = match service_update_result {
-        Ok(record) => {
-            StatusCode::OK,
-            Json(json!({"message": "Service updated successfully", "service_id": record.id}))
-        },
+        Ok(record) => record.id,
         Err(_) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to update service"})));
         }
     };
 
     //commit the transaction
-    if let Err(_)=> tx.commit().await {
+    if let Err(_)= tx.commit().await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to commit transaction"})));
     }
 
@@ -369,7 +361,7 @@ pub async fn upload_service_attachments (
         target_type: "service".to_string(),
         target_id: service_id,
         uploaded_by: user_id.parse::<i32>().unwrap(),
-    }
+    };
 
     upload_attachments(
         State(pool),

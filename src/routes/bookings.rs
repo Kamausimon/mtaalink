@@ -29,7 +29,7 @@ pub struct Booking {
     pub target_type: String,                   // e.g., "business", "provider"
     pub target_id: i32,                        // e.g., business_id or provider_id
     pub branch_id: Option<i32>,
-    pub service_id: Option<i32>                // e.g., branch_id if applicable
+    pub service_id: Option<i32>,                // e.g., branch_id if applicable
     pub service_description: String,           // e.g., "haircut", "plumbing service"
     pub scheduled_time: chrono::NaiveDateTime, // e.g., "2023-10-01 14:00:00"
 }
@@ -64,7 +64,7 @@ pub async fn create_booking(
         }
     } else {
         60 // Default duration if no service_id is provided
-    }
+    };
 
     if target_id <= 0 {
         return (
@@ -290,9 +290,9 @@ pub async fn get_bookings_received(
         LEFT JOIN services s ON b.service_id = s.id
         WHERE b.target_type = $1 AND b.target_id = $2 AND b.status = $3
         ORDER BY b.scheduled_time DESC
-        "#
-        target_type
-        target_id
+        "#,
+        target_type,
+        target_id,
         status
     )
     .fetch_all(&pool)
