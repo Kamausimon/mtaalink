@@ -6,7 +6,7 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.7", features = ["json", "macros","multipart"] }
-sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "macros", "chrono", "time"] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "macros", "chrono", "time", "bigdecimal"] }
 askama = "0.12"
 dotenvy = "0.15"
 tracing = "0.1"
