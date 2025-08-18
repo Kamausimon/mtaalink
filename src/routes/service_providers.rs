@@ -13,6 +13,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use sqlx::{Postgres, Transaction};
 use validator::Validate;
+use chrono::NaiveTime;
 
 pub fn service_providers_routes(pool: PgPool) -> Router {
     Router::new()
@@ -484,9 +485,23 @@ pub async fn update_provider_availability(
         );
     }
 
+  let start_time = NaiveTime::parse_from_str(&payload.start_time, "%H:%M").map_err(|e| {
+     (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": format!("Invalid start time format: {}", e)})),
+     )
+  })?;
+
+    let end_time = NaiveTime::parse_from_str(&payload.end_time, "%H:%M").map_err(|e| {
+         (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid end time format: {}", e)})),
+         )
+    })?;
+
     //check if the provider exists
     let provider_exists = sqlx::query!(
-        "SELECT 1 FROM providers WHERE id = $1",
+        "SELECT 1 AS exists FROM providers WHERE id = $1",
         payload.provider_id
     )
     .fetch_optional(&pool)
@@ -510,7 +525,7 @@ pub async fn update_provider_availability(
 
     //check if the availability already exists
     let availability_exists = sqlx::query!(
-        "SELECT 1 FROM provider_availability WHERE provider_id = $1 AND day = $2",
+        "SELECT 1 AS exists FROM provider_availability WHERE provider_id = $1 AND day = $2",
         payload.provider_id,
         payload.day
     ).fetch_optional(&pool).await;
@@ -522,8 +537,8 @@ pub async fn update_provider_availability(
             let update_result = sqlx::query!(
                 "UPDATE provider_availability SET is_available = $1, start_time = $2, end_time = $3 WHERE provider_id = $4 AND day = $5",
                 payload.is_available,
-                payload.start_time,
-                payload.end_time,
+             start_time,
+                end_time,
                 payload.provider_id,
                 payload.day
             )
@@ -548,8 +563,8 @@ pub async fn update_provider_availability(
                 payload.provider_id,
                 payload.is_available,
                 payload.day,
-                payload.start_time,
-                payload.end_time
+                start_time,
+                end_time
             )
             .execute(&pool)
             .await;
@@ -599,6 +614,8 @@ pub async fn update_bulk_availability(
     .fetch_optional(&pool)
     .await;
 
+  
+
     let provider_id = match provider_result {
         Ok(Some(provider)) => provider.id,
         Ok(None) => {
@@ -631,6 +648,28 @@ pub async fn update_bulk_availability(
     let mut created_count = 0;
 
     for item in payload.availability {
+
+         let start_time = match NaiveTime::parse_from_str(&item.start_time, "%H:%M") {
+        Ok(time) => time,
+        Err(_) => {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Invalid start time format for {}: Use HH:MM", item.day)}))
+            );
+        }
+    };
+    
+    let end_time = match NaiveTime::parse_from_str(&item.end_time, "%H:%M") {
+        Ok(time) => time,
+        Err(_) => {
+            let _ = tx.rollback().await;
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Invalid end time format for {}: Use HH:MM", item.day)}))
+            );
+        }
+    };
         // For each day, either update or insert
         let availability_exists = sqlx::query!(
             "SELECT id FROM provider_availability WHERE provider_id = $1 AND day = $2",
@@ -647,8 +686,8 @@ pub async fn update_bulk_availability(
                     "UPDATE provider_availability SET is_available = $1, start_time = $2, end_time = $3 
                      WHERE id = $4 AND provider_id = $5",
                     item.is_available,
-                    item.start_time,
-                    item.end_time,
+                    start_time,
+                    end_time,
                     record.id,
                     provider_id
                 )
@@ -673,8 +712,8 @@ pub async fn update_bulk_availability(
                     provider_id,
                     item.is_available,
                     item.day,
-                    item.start_time,
-                    item.end_time
+                    start_time,
+                    end_time
                 )
                 .execute(&mut *tx)
                 .await;

@@ -60,16 +60,17 @@ pub async fn create_booking(
     let service_id = payload.service_id;
     let service_description = payload.service_description.trim().to_string();
     let scheduled_time = payload.scheduled_time;
-    let service_duration = if let Some(service_id) = service_id{
-        match sqlx::query!(
-            "SELECT duration FROM services WHERE id  = $1", service_id
-        ).fetch_optional(&pool).await{
-            Ok(Some(service)) => service.duration,
-            _=>60, // Default duration if service not found
-        }
-    } else {
-        60 // Default duration if no service_id is provided
-    };
+let service_duration = if let Some(service_id) = service_id {
+    // Try to get the duration from the database
+    match sqlx::query!(
+        "SELECT duration FROM services WHERE id = $1", service_id
+    ).fetch_optional(&pool).await {
+        Ok(Some(service)) => service.duration.unwrap_or(60),
+        _ => 60, // Default if query fails or returns no rows
+    }
+} else {
+    60 // Default if no service_id provided
+};
 
     if target_id <= 0 {
         return (
@@ -152,17 +153,21 @@ let existing_service_id_exists = if let Some(service_id_val) = service_id {
         target_id   
     ).fetch_optional(&pool).await
 } else {
-    Ok(Some(sqlx::postgres::PgRow::default()))  // Skip check if no service_id provided
+   //skip if no service_id is provided
+    Ok(None)
 };
 
     match existing_service_id_exists {
         Ok(Some(_)) => {}, // Service exists, proceed
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Service ID does not exist"})),
-            );
-        }
+            // If service_id is provided but does not exist, return an error
+            if service_id.is_some(){
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Service ID does not exist"})),
+                );
+            }
+        },
         Err(e) => {
             eprintln!("Error checking service existence: {}", e);
             return (
@@ -278,7 +283,7 @@ pub struct BookingResponse {
     pub created_at: Option<NaiveDateTime>,
     pub client_name: String,
     pub client_email: String,
-    pub client_phone: String,
+    pub client_phone: Option<String>, // Assuming phone is optional
     pub service_name: String,
 }
 
@@ -310,7 +315,8 @@ let result = sqlx::query!(
     r#"
     SELECT b.id, b.client_id, b.target_type, b.target_id, b.branch_id, b.service_id, 
            b.service_description, b.scheduled_time, b.status, b.duration, b.created_at, 
-           u.name as client_name, u.email as client_email, u.phone as client_phone,
+           u.username as client_name, u.email as client_email, 
+           '' as client_phone,  -- Empty string since phone doesn't exist
            CASE
                WHEN b.service_id IS NOT NULL THEN s.title
                ELSE b.service_description
@@ -337,7 +343,7 @@ let result = sqlx::query!(
                 target_id: row.target_id,
                 branch_id: row.branch_id,
                 service_id: row.service_id,
-                service_description: row.service_description,
+                service_description: row.service_description.expect("Service description should not be null"),
                 scheduled_time: row.scheduled_time,
                 status: row.status,
                 duration: row.duration.unwrap_or(60), // Default to 60 mins if not specified

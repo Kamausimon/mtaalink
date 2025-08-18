@@ -13,9 +13,9 @@ use uuid::Uuid;
 use std::fs::File;
 use std::io::Write;
 use sqlx::{Postgres, Transaction};
-use bigdecimal::BigDecimal;
+use sqlx::types::BigDecimal;
 
-use crate::utils::attachments::upload_attachments;
+use crate::utils::attachments::{upload_attachments, AttachmentParams};
 use crate::extractors::current_user::CurrentUser;
 
 //routes for services
@@ -75,7 +75,7 @@ pub async fn create_service(
     // Check if the target exists and user has permission
     let target_exists = match payload.target_type.as_str() {
         "provider" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
                 payload.target_id, 
                 user_id
@@ -84,7 +84,7 @@ pub async fn create_service(
             .await
         },
         "business" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
                 payload.target_id, 
                 user_id
@@ -169,7 +169,7 @@ pub async fn get_services(
 ) -> impl IntoResponse {
     // Prepare query based on filters
     let mut query = String::from("SELECT * FROM services WHERE 1=1");
-    let mut query_params: Vec<Box<dyn sqlx::postgres::PgArgumentBuffer + '_>> = Vec::new();
+let mut query_params: Vec<Box<sqlx::postgres::PgArgumentBuffer>> = Vec::new();
     
     // Add target filtering if provided
     if let Some(target_id) = params.target_id {
@@ -255,14 +255,14 @@ pub async fn edit_service(
     // Check if the user owns this target
     let target_exists = match payload.target_type.as_str() {
         "provider" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id from providers WHERE user_id = $1 AND id = $2",
                 user_id.parse::<i32>().unwrap(),
                 payload.target_id
             ).fetch_optional(&mut *tx).await
         },
         "business" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id from businesses WHERE user_id = $1 AND id = $2",
                 user_id.parse::<i32>().unwrap(),
                 payload.target_id
@@ -367,14 +367,14 @@ pub async fn delete_service(
     // Check if user owns this service's target
     let owner_check = match target_type.as_str() {
         "provider" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
                 target_id,
                 user_id.parse::<i32>().unwrap()
             ).fetch_optional(&mut *tx).await
         },
         "business" => {
-            sqlx::query!(
+            sqlx::query_scalar!(
                 "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
                 target_id,
                 user_id.parse::<i32>().unwrap()
@@ -423,12 +423,7 @@ pub async fn delete_service(
     }
 }
 
-#[derive(Deserialize)]
-pub struct AttachmentParams {
-    pub target_type: String,
-    pub target_id: i32,
-    pub uploaded_by: i32,
-}
+
 
 //upload attachments to the service
 pub async fn upload_service_attachments (
@@ -464,7 +459,7 @@ let permission_check = sqlx::query!(
     upload_attachments(
         State(pool),
         Query(params),
-        CurrentUser { user_id },
+        CurrentUser { user_id: user_id.clone() },
         multipart,
     ).await
 }
