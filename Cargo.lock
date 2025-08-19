@@ -885,6 +885,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -2348,6 +2349,7 @@ dependencies = [
  "axum 0.7.9",
  "axum-params",
  "axum-server",
+ "bigdecimal",
  "chrono",
  "dotenvy",
  "jsonwebtoken",

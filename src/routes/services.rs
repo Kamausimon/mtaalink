@@ -13,7 +13,7 @@ use uuid::Uuid;
 use std::fs::File;
 use std::io::Write;
 use sqlx::{Postgres, Transaction};
-use sqlx::types::BigDecimal;
+use bigdecimal::BigDecimal;
 
 use crate::utils::attachments::{upload_attachments, AttachmentParams};
 use crate::extractors::current_user::CurrentUser;
@@ -167,50 +167,42 @@ pub async fn get_services(
     State(pool): State<PgPool>,
     Query(params): Query<GetServicesParams>,
 ) -> impl IntoResponse {
-    // Prepare query based on filters
-    let mut query = String::from("SELECT * FROM services WHERE 1=1");
-let mut query_params: Vec<Box<sqlx::postgres::PgArgumentBuffer>> = Vec::new();
+    // Build a query dynamically
+    let mut query_builder = sqlx::QueryBuilder::new("SELECT * FROM services WHERE 1=1");
     
     // Add target filtering if provided
     if let Some(target_id) = params.target_id {
         if let Some(target_type) = &params.target_type {
-            query.push_str(" AND target_type = $1 AND target_id = $2");
-            query_params.push(Box::new(target_type.clone()));
-            query_params.push(Box::new(target_id));
+            query_builder.push(" AND target_type = ");
+            query_builder.push_bind(target_type);
+            query_builder.push(" AND target_id = ");
+            query_builder.push_bind(target_id);
         } else {
-            query.push_str(" AND target_id = $1");
-            query_params.push(Box::new(target_id));
+            query_builder.push(" AND target_id = ");
+            query_builder.push_bind(target_id);
         }
     }
     
     // Add category filter if provided
     if let Some(category_id) = params.category_id {
-        let param_index = query_params.len() + 1;
-        query.push_str(&format!(" AND category_id = ${}", param_index));
-        query_params.push(Box::new(category_id));
+        query_builder.push(" AND category_id = ");
+        query_builder.push_bind(category_id);
     }
     
     // Add active filter
     if let Some(is_active) = params.is_active {
-        let param_index = query_params.len() + 1;
-        query.push_str(&format!(" AND is_active = ${}", param_index));
-        query_params.push(Box::new(is_active));
+        query_builder.push(" AND is_active = ");
+        query_builder.push_bind(is_active);
     }
     
-    query.push_str(" ORDER BY created_at DESC");
+    // Add order by
+    query_builder.push(" ORDER BY created_at DESC");
     
-    // Execute query using proper binding approach
-    let mut sql_query = sqlx::query_as::<_, Service>(&query);
+    // Build the query
+    let query = query_builder.build_query_as::<Service>();
     
-    // This approach avoids the issue with trait objects
-    // Bind each parameter individually
-    for param in query_params {
-        sql_query = sql_query.bind(param);
-    }
-    
-    let services_result = sql_query.fetch_all(&pool).await;
-    
-    match services_result {
+    // Execute the query
+    match query.fetch_all(&pool).await {
         Ok(services) => {
             (StatusCode::OK, Json(json!({"services": services})))
         },
@@ -426,36 +418,32 @@ pub async fn delete_service(
 
 
 //upload attachments to the service
-pub async fn upload_service_attachments (
+pub async fn upload_service_attachments(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Path(service_id): Path<i32>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-let permission_check = sqlx::query!(
-    "SELECT s.id FROM services s 
-    JOIN providers p ON s.target_id = p.id AND s.target_type = 'provider'
-    WHERE s.id = $1 AND p.user_id = $2",
-    service_id,
-    user_id.parse::<i32>().unwrap()
-).fetch_optional(&pool).await;
+    // Check permissions first
+    let permission_check = sqlx::query!(
+        "SELECT s.id FROM services s 
+        JOIN providers p ON s.target_id = p.id AND s.target_type = 'provider'
+        WHERE s.id = $1 AND p.user_id = $2",
+        service_id,
+        user_id.parse::<i32>().unwrap()
+    ).fetch_optional(&pool).await;
 
-    match permission_check {
-        Ok(Some(_)) => {},
-        Ok(None) => {
-            return (StatusCode::FORBIDDEN, Json(json!({"message": "You do not have permission to upload attachments for this service"})));
-        },
-        Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message": "Failed to check permissions"})));
-        }
-    }
-
+   
+    
+    // If we get here, permission is granted
     let params = AttachmentParams {
         target_type: "service".to_string(),
         target_id: service_id,
         uploaded_by: user_id.parse::<i32>().unwrap(),
     };
 
+    // This works because we're returning the IntoResponse directly
+    // and not trying to assign it to a specific concrete type
     upload_attachments(
         State(pool),
         Query(params),

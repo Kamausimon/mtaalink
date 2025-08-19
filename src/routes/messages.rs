@@ -349,13 +349,12 @@ pub async fn get_unread_messages_count(
 
 #[derive(Serialize,sqlx::FromRow, Debug,Deserialize)]
 pub struct ConversationResponse {
-    pub participant_id: i32,
-    pub participant_name: String,
-    pub participant_avatar: Option<String>,
+    pub participant_id: Option<i32>,
+    pub participant_name: Option<String>,
     pub last_message: Option<String>,
     pub last_message_time: Option<NaiveDateTime>,
-    pub unread_count: i64,
-    pub user_type:String //can be be client, provider, business
+    pub unread_count: Option<i64>,
+    pub user_type:Option<String> //can be be client, provider, business
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -429,14 +428,13 @@ let result = sqlx::query_as!(
 
         --join everything together
         SELECT 
-          cp.participant_id,
-            u.username AS participant_name,
-            u.avatar AS participant_avatar,
+          COALESCE( cp.participant_id,0) AS participant_id,
+            COALESCE (u.username,'') AS participant_name,
             lm.last_message,
             lm.last_message_time,
             COALESCE(uc.unread_count, 0) AS unread_count,
             COALESCE(
-            (SELECT user_type FROM users WHERE id = cp.participant_id),
+            (SELECT role FROM users WHERE id = cp.participant_id),
             'unknown'
             ) AS user_type
         FROM conversation_partners cp
