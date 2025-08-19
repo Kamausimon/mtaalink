@@ -485,19 +485,24 @@ pub async fn update_provider_availability(
         );
     }
 
-  let start_time = NaiveTime::parse_from_str(&payload.start_time, "%H:%M").map_err(|e| {
-     (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"error": format!("Invalid start time format: {}", e)})),
-     )
-  })?;
-
-    let end_time = NaiveTime::parse_from_str(&payload.end_time, "%H:%M").map_err(|e| {
-         (
+let start_time = match NaiveTime::parse_from_str(&payload.start_time, "%H:%M") {
+    Ok(time) => time,
+    Err(e) => {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Invalid start time format: {}", e)})),
+        );
+    }
+};
+let end_time = match NaiveTime::parse_from_str(&payload.end_time, "%H:%M") {
+    Ok(time) => time,
+    Err(e) => {
+        return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": format!("Invalid end time format: {}", e)})),
-         )
-    })?;
+        );
+    }
+};
 
     //check if the provider exists
     let provider_exists = sqlx::query!(
