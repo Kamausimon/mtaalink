@@ -1,74 +1,117 @@
-MtaaLink API Backend
-Overview
+md
+# MtaaLink API Backend
+
+## Overview
+
 MtaaLink is a service marketplace platform connecting service providers with clients. The backend is built with Rust using the Axum web framework, offering a robust, type-safe API with PostgreSQL database integration.
 
-Features
-User Management: Authentication, registration, profile management
-Service Providers: Create profiles, manage availability, list services
-Service Listings: Create, search, and manage service offerings
-Bookings: Schedule and manage service appointments
-Real-time Messaging: Communication between clients and service providers
-Admin Dashboard: User management, category administration
-File Uploads: Support for service attachments and user avatars
-Technology Stack
-Language: Rust
-Web Framework: Axum
-Database: PostgreSQL with SQLx
-Authentication: JWT tokens
-Validation: Request validation with the validator crate
-File Storage: Local file system with proper organization
+## Key Features & Benefits
 
-API Routes
-Authentication
-POST /auth/register - Register a new user
-POST /auth/login - Login and receive JWT token
-POST /auth/verify_email - Verify user email
-POST /auth/refresh_token - Get a new access token
-User Management
-GET /users/me - Get current user profile
-PUT /users/update - Update user profile
-POST /users/avatar - Upload user avatar
-Services
-GET /services - List available services with filtering
-POST /services - Create a new service
-GET /services/:id - Get service details
-PUT /services/:id - Update a service
-POST /services/:id/attachments - Add attachments to a service
-Service Providers
-GET /providers - List service providers
-GET /providers/:id - Get provider details
-POST /providers - Create provider profile
-PUT /providers/:id - Update provider profile
-POST /providers/availability - Set provider availability
-Bookings
-GET /bookings - List user bookings
-POST /bookings - Create a new booking
-PUT /bookings/:id/status - Update booking status
-Messages
-GET /messages/conversations - List user conversations
-GET /messages/:conversation_id - Get conversation messages
-POST /messages - Send a new message
-PUT /messages/read - Mark messages as read
-Admin Routes
-GET /admin/categories - List all categories
-POST /admin/create_category - Create a new category
-POST /admin/create_parent_category - Create parent category with subcategory
-POST /admin/delete_category - Delete a category
-GET /admin/users - List all users
-POST /admin/delete_user - Delete a user
-Getting Started
-Prerequisites
-Rust (latest stable)
-PostgreSQL
-Cargo
+*   **User Management:** Authentication, registration, profile management.
+*   **Service Providers:** Create profiles, manage availability, list services.
+*   **Service Listings:** Create, search, and manage service offerings.
+*   **Bookings:** Schedule and manage service appointments.
+*   **Robust & Type-Safe:** Built with Rust and Axum for reliability and maintainability.
+*   **PostgreSQL Integration:** Utilizes PostgreSQL for data persistence.
+*   **Well-Structured Codebase:** Organized into modules for clarity and scalability.
 
-Setup
-Clone the repository
-Set up environment variables (see .env.example)
-Run database migrations:
+## Prerequisites & Dependencies
 
-cargo sqlx migrate run
+Before you begin, ensure you have the following installed:
 
-Start the server
-cargo run
+*   **Rust:** Rust toolchain (including Cargo) - Install from [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
+*   **PostgreSQL:** PostgreSQL database server - Install from [https://www.postgresql.org/download/](https://www.postgresql.org/download/)
+*   **Docker (Optional):** For containerization and simplified setup.
+*   **Cargo:** Rust's package manager (comes with Rust installation).
 
+## Installation & Setup Instructions
+
+1.  **Clone the Repository:**
+
+    ```bash
+    git clone https://github.com/Kamausimon/mtaalink.git
+    cd mtaalink
+    ```
+
+2.  **Install Dependencies:**
+
+    ```bash
+    cargo build
+    ```
+
+3.  **Set up the PostgreSQL Database:**
+
+    *   Create a new database named `mtaalink` (or customize in `.env`).
+    *   Create the necessary tables by running the database migrations. Instructions on setting up migrations will be added soon.
+
+4.  **Configure Environment Variables:**
+
+    *   Create a `.env` file in the root directory based on the example below:
+
+        ```
+        DATABASE_URL="postgres://user:password@host:port/mtaalink"
+        JWT_SECRET="your_jwt_secret"
+        # Add any other configuration variables here
+        ```
+
+    *   Replace placeholders with your actual database credentials and JWT secret.  **Important:** Use a strong and secure secret key for JWT!
+
+5.  **Run the Application:**
+
+    ```bash
+    cargo run
+    ```
+
+    This will start the MtaaLink API backend.
+
+## Usage Examples & API Documentation
+
+API documentation is currently under development. Once available, it will provide detailed information on endpoints, request/response formats, and authentication. Stay tuned for updates!
+
+For now, refer to the `src/routes` directory to understand the available API endpoints:
+
+*   `/routes/auth.rs`: Authentication routes (login, registration).
+*   `/routes/businesses.rs`: Routes for managing businesses.
+*   `/routes/bookings.rs`: Routes for managing bookings.
+
+## Configuration Options
+
+The application's behavior can be configured using environment variables defined in the `.env` file.
+
+| Variable       | Description                                                               | Default Value |
+| -------------- | ------------------------------------------------------------------------- | ------------- |
+| `DATABASE_URL` | The connection string for the PostgreSQL database.                         |               |
+| `JWT_SECRET`   | The secret key used for signing JSON Web Tokens (JWT).                    |               |
+| `PORT`         | The port on which the application will listen.                             | `3000`          |
+| `LOG_LEVEL`    | The log level for the application (e.g., `debug`, `info`, `warn`, `error`). | `info`          |
+
+## Contributing Guidelines
+
+We welcome contributions to the MtaaLink project! To contribute:
+
+1.  Fork the repository.
+2.  Create a new branch for your feature or bug fix.
+3.  Implement your changes, ensuring they are well-tested and documented.
+4.  Submit a pull request with a clear description of your changes.
+
+Please follow these guidelines:
+
+*   Write clean, well-documented code.
+*   Follow the existing code style and conventions.
+*   Include unit tests for new features and bug fixes.
+*   Ensure your changes do not break existing functionality.
+
+## License Information
+
+License information is not yet specified. This will be updated soon.
+
+## Acknowledgments
+
+The MtaaLink project utilizes the following open-source libraries and frameworks:
+
+*   **Rust:** The programming language.
+*   **Axum:** The web framework.
+*   **Tokio:** The asynchronous runtime.
+*   **PostgreSQL:** The database system.
+
+We would like to express our gratitude to the developers and maintainers of these excellent tools.
