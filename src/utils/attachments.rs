@@ -1,16 +1,16 @@
-use crate::errors::AppError;
-use chrono::NaiveDateTime;
+use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::storage::{SharedStorage, generate_key};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Query, State},
     http::StatusCode,
     routing::post,
 };
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use tokio::fs;
 use uuid::Uuid;
 
 pub fn attachments_routes(pool: PgPool) -> Router {
@@ -28,6 +28,7 @@ pub struct AttachmentParams {
 
 pub async fn upload_attachments(
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     Query(params): Query<AttachmentParams>,
     CurrentUser { user_id: _ }: CurrentUser,
     mut multipart: axum::extract::Multipart,
@@ -36,10 +37,6 @@ pub async fn upload_attachments(
     let target_id = params.target_id;
     let uploaded_by = params.uploaded_by;
     let created_at = chrono::Utc::now().naive_utc();
-
-    fs::create_dir_all("uploads/attachments")
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to create upload directory: {}", e)))?;
 
     while let Some(field) = multipart
         .next_field()
@@ -72,18 +69,14 @@ pub async fn upload_attachments(
             _ => continue,
         };
 
-        let unique_name = format!("{}.{}", Uuid::new_v4(), file_name);
-        let path = format!("uploads/attachments/{}", unique_name);
-
-        fs::write(&path, &data)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to write file: {}", e)))?;
+        let key = generate_key("attachments", &extension);
+        let url = storage.save(&key, &data).await?;
 
         let result = sqlx::query!(
             "INSERT INTO attachments (file_name, file_path, file_type, target_type, target_id, uploaded_by, created_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            unique_name,
-            path,
+            file_name,
+            url,
             file_type,
             target_type,
             target_id,
@@ -94,7 +87,7 @@ pub async fn upload_attachments(
         .await;
 
         if let Err(e) = result {
-            let _ = fs::remove_file(&path).await;
+            let _ = storage.delete(&key).await;
             return Err(AppError::Database(e));
         }
     }
@@ -123,7 +116,7 @@ pub struct SerializableAttachment {
 pub async fn get_attachments(
     State(pool): State<PgPool>,
     Query(params): Query<AttachmentQuery>,
-) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let attachments = sqlx::query_as!(
         SerializableAttachment,
         "SELECT id, file_name, file_path, file_type, post_id, target_type, target_id, created_at \
