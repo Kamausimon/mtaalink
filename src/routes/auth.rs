@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::email::{EmailConfig, password_reset_html, send_email};
 use crate::utils::jwt::create_jwt;
 use argon2::{
     Argon2, PasswordVerifier,
@@ -13,6 +14,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+use std::env;
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -298,8 +300,10 @@ pub async fn forgot_password(
     let token = Uuid::new_v4().to_string();
     let expiry = (Utc::now() + Duration::minutes(15)).naive_utc();
 
+    // Upsert: replace any existing reset token for this user
     sqlx::query!(
-        "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)",
+        "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET token = EXCLUDED.token, expires_at = EXCLUDED.expires_at",
         user.id,
         token,
         expiry
@@ -307,7 +311,18 @@ pub async fn forgot_password(
     .execute(&pool)
     .await?;
 
-    // TODO Phase 4: send token via email instead of returning it
+    let app_url = env::var("APP_URL").unwrap_or_else(|_| "http://localhost:7878".to_string());
+    let reset_url = format!("{}/auth/reset-password?token={}", app_url, token);
+    let html = password_reset_html(&reset_url, 15);
+
+    if let Ok(config) = EmailConfig::from_env() {
+        if let Err(e) = send_email(&config, &payload.email, "Reset your MtaaLink password", &html).await {
+            tracing::error!("Failed to send password reset email: {}", e);
+        }
+    } else {
+        tracing::warn!("Email not configured — skipping password reset email");
+    }
+
     Ok((
         StatusCode::OK,
         Json(json!({ "message": "If that email exists, a reset link has been sent" })),
