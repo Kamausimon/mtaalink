@@ -1,9 +1,9 @@
+use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use axum::{
-    Router,
-    extract::{Json, Path, Query, State},
+    Json, Router,
+    extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
 };
 use chrono::NaiveDateTime;
@@ -15,61 +15,32 @@ use validator::Validate;
 pub fn locations_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/allcounties", get(get_locations_counties))
-        .route(
-            "/counties/:county_id/constituencies",
-            get(get_constituencies_by_county),
-        )
-        .route(
-            "/constituencies/:constituency_id/wards",
-            get(get_wards_by_constituency),
-        )
-        .route(
-            "/branches/:business_id/location",
-            post(create_branch_location),
-        )
-        .route(
-            "/branches/:business_id/locations",
-            get(get_branch_locations),
-        )
+        .route("/counties/:county_id/constituencies", get(get_constituencies_by_county))
+        .route("/constituencies/:constituency_id/wards", get(get_wards_by_constituency))
+        .route("/branches/:business_id/location", post(create_branch_location))
+        .route("/branches/:business_id/locations", get(get_branch_locations))
         .route("/providers/:provider_id", post(create_provider_location))
         .route("/search", get(search_business_or_provider_by_location))
-        // .route("/:id", get(get_location_by_id).put(update_location).delete(delete_location))
         .with_state(pool)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct Counties {
     pub id: i32,
     pub name: String,
 }
 
-pub async fn get_locations_counties(State(pool): State<PgPool>) -> impl IntoResponse {
-    let counties_query = "SELECT id, name FROM counties";
-
-    let counties = sqlx::query_as::<_, Counties>(&counties_query)
+pub async fn get_locations_counties(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let counties = sqlx::query_as::<_, Counties>("SELECT id, name FROM counties")
         .fetch_all(&pool)
-        .await;
+        .await?;
 
-    match counties {
-        Ok(counties) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "success",
-                "data": counties
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to fetch counties: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::OK, Json(json!({ "data": counties }))))
 }
 
-// Get constituencies by county
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct Constituency {
     pub id: i32,
     pub name: String,
@@ -78,34 +49,18 @@ pub struct Constituency {
 pub async fn get_constituencies_by_county(
     Path(county_id): Path<i32>,
     State(pool): State<PgPool>,
-) -> impl IntoResponse {
-    let query = "SELECT id, name FROM constituencies WHERE county_id = $1";
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let constituencies = sqlx::query_as::<_, Constituency>(
+        "SELECT id, name FROM constituencies WHERE county_id = $1",
+    )
+    .bind(county_id)
+    .fetch_all(&pool)
+    .await?;
 
-    let constituencies = sqlx::query_as::<_, Constituency>(query)
-        .bind(county_id)
-        .fetch_all(&pool)
-        .await;
-
-    match constituencies {
-        Ok(constituencies) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "success",
-                "data": constituencies
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to fetch constituencies: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::OK, Json(json!({ "data": constituencies }))))
 }
 
-// Get wards by constituency
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct Ward {
     pub id: i32,
     pub name: String,
@@ -114,37 +69,22 @@ pub struct Ward {
 pub async fn get_wards_by_constituency(
     Path(constituency_id): Path<i32>,
     State(pool): State<PgPool>,
-) -> impl IntoResponse {
-    let query = "SELECT id, name FROM wards WHERE constituency_id = $1";
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let wards = sqlx::query_as::<_, Ward>(
+        "SELECT id, name FROM wards WHERE constituency_id = $1",
+    )
+    .bind(constituency_id)
+    .fetch_all(&pool)
+    .await?;
 
-    let wards = sqlx::query_as::<_, Ward>(query)
-        .bind(constituency_id)
-        .fetch_all(&pool)
-        .await;
-
-    match wards {
-        Ok(wards) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "success",
-                "data": wards
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to fetch wards: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::OK, Json(json!({ "data": wards }))))
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct BusinessBranchLocation {
     id: i32,
     created_at: NaiveDateTime,
-    updated_at: Option<NaiveDateTime>, // If nullable
+    updated_at: Option<NaiveDateTime>,
     name: String,
     latitude: f64,
     longitude: f64,
@@ -153,7 +93,7 @@ pub struct BusinessBranchLocation {
     address: String,
 }
 
-#[derive(Deserialize, Validate, sqlx::FromRow, Serialize, Debug, Clone)]
+#[derive(Deserialize, Validate, Serialize, Debug, Clone, sqlx::FromRow)]
 pub struct CreateBranchLocationRequest {
     #[validate(length(min = 1, max = 100))]
     pub name: String,
@@ -166,111 +106,54 @@ pub struct CreateBranchLocationRequest {
     pub address: String,
 }
 
-// Create a new branch location for a business
 pub async fn create_branch_location(
     Path(business_id): Path<i32>,
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<CreateBranchLocationRequest>,
-) -> impl IntoResponse {
-    //validate that the user owns the business
-    let business_ownership = sqlx::query_scalar!(
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let owns = sqlx::query_scalar!(
         "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
-        business_id,
-        user_id.parse::<i32>().unwrap()
+        business_id, user_id
     )
     .fetch_optional(&pool)
-    .await;
+    .await?;
 
-    match business_ownership {
-        Ok(Some(_)) => {} // User owns the business, proceed
-        Ok(None) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "status": "error",
-                    "message": "You do not have permission to create a branch for this business"
-                })),
-            );
-        }
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "status": "error",
-                    "message": format!("Database error: {}", err)
-                })),
-            );
-        }
+    if owns.is_none() {
+        return Err(AppError::Forbidden(
+            "You do not have permission to create a branch for this business".to_string(),
+        ));
     }
 
-    //validate the payload
-    if let Err(e) = payload.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "status": "error",
-                "message": format!("Validation error: {}", e)
-            })),
-        );
-    }
+    payload.validate().map_err(|e| AppError::BadRequest(e.to_string()))?;
 
-    //check the business id
     if business_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "status": "error",
-                "message": "Invalid business ID"
-            })),
-        );
+        return Err(AppError::BadRequest("Invalid business ID".to_string()));
     }
 
-    // Insert the new branch location into the database
-    let query = r#"
-        INSERT INTO business_branches (business_id, name, latitude, longitude, ward_id, phone, address, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, business_id, name, latitude, longitude, ward_id,phone,address,created_at,updated_at"#;
+    let now = chrono::Utc::now().naive_utc();
 
-    let result = sqlx::query_as::<_, CreateBranchLocationRequest>(query)
-        .bind(business_id)
-        .bind(payload.name)
-        .bind(payload.latitude)
-        .bind(payload.longitude)
-        .bind(payload.ward_id)
-        .bind(payload.phone)
-        .bind(payload.address)
-        .bind(NaiveDateTime::from_timestamp(
-            chrono::Utc::now().timestamp(),
-            0,
-        )) // Use current time for created_at
-        .bind(NaiveDateTime::from_timestamp(
-            chrono::Utc::now().timestamp(),
-            0,
-        )) // Use current time for updated_at
-        .fetch_one(&pool)
-        .await;
+    let location = sqlx::query_as::<_, CreateBranchLocationRequest>(
+        r#"INSERT INTO business_branches (business_id, name, latitude, longitude, ward_id, phone, address, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING name, latitude, longitude, ward_id, phone, address"#,
+    )
+    .bind(business_id)
+    .bind(&payload.name)
+    .bind(payload.latitude)
+    .bind(payload.longitude)
+    .bind(payload.ward_id)
+    .bind(&payload.phone)
+    .bind(&payload.address)
+    .bind(now)
+    .bind(now)
+    .fetch_one(&pool)
+    .await?;
 
-    match result {
-        Ok(location) => (
-            StatusCode::CREATED,
-            Json(json!({
-                "status": "success",
-                "data": location
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to create branch location: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::CREATED, Json(json!({ "data": location }))))
 }
 
-//get the full branch location details
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct BranchLocationResponse {
     pub id: i32,
     pub business_id: i32,
@@ -278,9 +161,9 @@ pub struct BranchLocationResponse {
     pub latitude: f64,
     pub longitude: f64,
     pub ward_id: i32,
-    pub ward_name: String,         // Assuming you want to include the ward name
-    pub constituency_name: String, // Assuming you want to include the constituency name
-    pub county_name: String,       // Assuming you want to include the county name
+    pub ward_name: String,
+    pub constituency_name: String,
+    pub county_name: String,
     pub phone: String,
     pub address: String,
     pub created_at: NaiveDateTime,
@@ -290,58 +173,25 @@ pub struct BranchLocationResponse {
 pub async fn get_branch_locations(
     Path(business_id): Path<i32>,
     State(pool): State<PgPool>,
-) -> impl IntoResponse {
-    let query = r#"
-        SELECT bl.id, bl.business_id, bl.name, bl.latitude, bl.longitude, 
-               bl.ward_id, w.name AS ward_name, c.name AS constituency_name, 
-               co.name AS county_name, bl.phone, bl.address, 
-               bl.created_at, bl.updated_at
-        FROM business_branches AS bl
-        JOIN wards AS w ON bl.ward_id = w.id
-        JOIN constituencies AS c ON w.constituency_id = c.id
-        JOIN counties AS co ON c.county_id = co.id
-        WHERE bl.business_id = $1"#;
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let locations = sqlx::query_as::<_, BranchLocationResponse>(
+        r#"SELECT bl.id, bl.business_id, bl.name, bl.latitude, bl.longitude,
+                  bl.ward_id, w.name AS ward_name, c.name AS constituency_name,
+                  co.name AS county_name, bl.phone, bl.address, bl.created_at, bl.updated_at
+           FROM business_branches bl
+           JOIN wards w ON bl.ward_id = w.id
+           JOIN constituencies c ON w.constituency_id = c.id
+           JOIN counties co ON c.county_id = co.id
+           WHERE bl.business_id = $1"#,
+    )
+    .bind(business_id)
+    .fetch_all(&pool)
+    .await?;
 
-    let locations = sqlx::query_as::<_, BranchLocationResponse>(query)
-        .bind(business_id)
-        .fetch_all(&pool)
-        .await;
-
-    match locations {
-        Ok(locations) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "success",
-                "data": locations
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to fetch branch locations: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::OK, Json(json!({ "data": locations }))))
 }
 
-//create an endpoint for provider to create a location
-#[derive(Serialize, Deserialize, Debug, Clone, Validate, sqlx::FromRow)]
-pub struct ProviderLocation {
-    id: i32,
-    provider_id: i32,
-    latitude: f64,
-    longitude: f64,
-    ward_id: i32,
-    #[validate(length(min = 1, max = 10))]
-    phone: String,
-    #[validate(length(min = 1, max = 255))]
-    address: String,
-    created_at: NaiveDateTime,
-    updated_at: NaiveDateTime,
-}
-
-#[derive(Deserialize, Validate, sqlx::FromRow, Serialize, Debug, Clone)]
+#[derive(Deserialize, Validate, Serialize, Debug, Clone, sqlx::FromRow)]
 pub struct ProviderLocationRequest {
     latitude: f64,
     longitude: f64,
@@ -355,135 +205,68 @@ pub async fn create_provider_location(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<ProviderLocationRequest>,
-) -> impl IntoResponse {
-    let provider_id = provider_id;
-    //check ownership of the provider
-    let provider_ownership = sqlx::query_scalar!(
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let owns = sqlx::query_scalar!(
         "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
-        provider_id,
-        user_id.parse::<i32>().unwrap()
+        provider_id, user_id
     )
     .fetch_optional(&pool)
-    .await;
+    .await?;
 
-    //match it
-    match provider_ownership {
-        Ok(Some(_)) => {} // User owns the provider, proceed
-        Ok(None) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "status": "error",
-                    "message": "You do not have permission to create a location for this provider"
-                })),
-            );
-        }
-        Err(err) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "status": "error",
-                    "message": format!("Database error: {}", err)
-                })),
-            );
-        }
-    }
-    // Validate the payload
-    if let Err(e) = payload.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "status": "error",
-                "message": format!("Validation error: {}", e)
-            })),
-        );
+    if owns.is_none() {
+        return Err(AppError::Forbidden(
+            "You do not have permission to create a location for this provider".to_string(),
+        ));
     }
 
-    // Check the provider id
+    payload.validate().map_err(|e| AppError::BadRequest(e.to_string()))?;
+
     if provider_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "status": "error",
-                "message": "Invalid provider ID"
-            })),
-        );
+        return Err(AppError::BadRequest("Invalid provider ID".to_string()));
     }
 
-    // Insert the new provider location into the database
-    let query = r#"
-        INSERT INTO provider_locations (provider_id, latitude, longitude, ward_id, phone, address, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7,$8)
-        RETURNING id, created_at, updated_at,provider_id, latitude,longitude,ward_id,phone,address"#;
+    let now = chrono::Utc::now().naive_utc();
 
-    let result = sqlx::query_as::<_, ProviderLocationRequest>(query)
-        .bind(provider_id)
-        .bind(payload.latitude)
-        .bind(payload.longitude)
-        .bind(payload.ward_id)
-        .bind(payload.phone)
-        .bind(payload.address)
-        .bind(NaiveDateTime::from_timestamp(
-            chrono::Utc::now().timestamp(),
-            0,
-        )) // Use current time for created_at
-        .bind(NaiveDateTime::from_timestamp(
-            chrono::Utc::now().timestamp(),
-            0,
-        )) // Use current time for updated_at
-        .fetch_one(&pool)
-        .await;
+    let location = sqlx::query_as::<_, ProviderLocationRequest>(
+        r#"INSERT INTO provider_locations (provider_id, latitude, longitude, ward_id, phone, address, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING latitude, longitude, ward_id, phone, address"#,
+    )
+    .bind(provider_id)
+    .bind(payload.latitude)
+    .bind(payload.longitude)
+    .bind(payload.ward_id)
+    .bind(&payload.phone)
+    .bind(&payload.address)
+    .bind(now)
+    .bind(now)
+    .fetch_one(&pool)
+    .await?;
 
-    match result {
-        Ok(location) => (
-            StatusCode::CREATED,
-            Json(json!({
-                "status": "success",
-                "data": location
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to create provider location: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::CREATED, Json(json!({ "data": location }))))
 }
 
-//endpoint for searching for businesses or service providers by location
-#[derive(Deserialize, Serialize, Debug, Clone, Validate, sqlx::FromRow)]
+#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
 pub struct SearchLocation {
     county_id: Option<i32>,
     constituency_id: Option<i32>,
     ward_id: Option<i32>,
-    target_type: String, // "business" or "provider"
+    target_type: String,
 }
 
 pub async fn search_business_or_provider_by_location(
     Query(params): Query<SearchLocation>,
     State(pool): State<PgPool>,
-) -> impl IntoResponse {
-    let mut query = String::from("SELECT * FROM ");
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let table = match params.target_type.as_str() {
+        "business" => "businesses",
+        "provider" => "providers",
+        _ => return Err(AppError::BadRequest("Invalid target type. Must be 'business' or 'provider'".to_string())),
+    };
+
+    let mut query = format!("SELECT * FROM {}", table);
     let mut conditions = Vec::new();
 
-    // Determine the target type and set the query accordingly
-    if params.target_type == "business" {
-        query.push_str("businesses");
-    } else if params.target_type == "provider" {
-        query.push_str("providers");
-    } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "status": "error",
-                "message": "Invalid target type. Must be 'business' or 'provider'."
-            })),
-        );
-    }
-
-    // Add conditions based on provided parameters
     if let Some(county_id) = params.county_id {
         conditions.push(format!("county_id = {}", county_id));
     }
@@ -499,27 +282,9 @@ pub async fn search_business_or_provider_by_location(
         query.push_str(&conditions.join(" AND "));
     }
 
-    // Execute the query
     let results = sqlx::query_as::<_, SearchLocation>(&query)
         .fetch_all(&pool)
-        .await;
+        .await?;
 
-    match results {
-        Ok(data) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "success",
-                "data": data
-            })),
-        ),
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "status": "error",
-                "message": format!("Failed to search: {}", err)
-            })),
-        ),
-    }
+    Ok((StatusCode::OK, Json(json!({ "data": results }))))
 }
-
-//todo implement get_location_by_id, update_location, delete_location

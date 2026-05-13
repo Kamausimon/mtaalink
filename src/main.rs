@@ -1,18 +1,21 @@
-use axum::http::{HeaderValue, Method, header};
+use axum::http::header;
 use axum::{Router, routing::get};
 use axum_server::bind;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod errors;
 mod extractors;
 mod routes;
 mod utils;
+
+pub use errors::{AppError, AppResult};
 
 use routes::admin::admin_routes;
 use routes::auth::auth_routes;

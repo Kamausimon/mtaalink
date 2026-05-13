@@ -20,11 +20,8 @@ jsonwebtoken = "9.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 axum-params = "0.4"
-aws-config = "1.1"
-aws-sdk-s3 = "1.12"
 tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
 tower-http = { version = "0.5", features = ["cors", "trace","full"] }
 tower = "0.4"
-multipart = "0.18"
 tokio-util = "0.7"
 bigdecimal = { version = "0.3.1", features = ["serde"] }

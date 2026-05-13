@@ -1,11 +1,12 @@
+use crate::AppResult;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String, // Subject (usually user ID)
-    pub exp: usize,  // Expiration time (as a UNIX timestamp)
+    pub sub: String,
+    pub exp: usize,
 }
 
 fn jwt_secret() -> Vec<u8> {
@@ -15,10 +16,10 @@ fn jwt_secret() -> Vec<u8> {
         .to_vec()
 }
 
-pub fn create_jwt(user_id: &str) -> String {
+pub fn create_jwt(user_id: &str) -> AppResult<String> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::hours(24))
-        .unwrap()
+        .expect("valid timestamp")
         .timestamp() as usize;
 
     let claims = Claims {
@@ -26,12 +27,13 @@ pub fn create_jwt(user_id: &str) -> String {
         exp: expiration,
     };
 
-    encode(
+    let token = encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(&jwt_secret()),
-    )
-    .expect("Failed to create JWT")
+    )?;
+
+    Ok(token)
 }
 
 pub fn decode_jwt(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
