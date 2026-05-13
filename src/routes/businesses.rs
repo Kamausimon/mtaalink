@@ -1,8 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::image_upload::save_image_to_fs;
+use crate::utils::image_upload::parse_image_from_multipart;
+use crate::utils::storage::{SharedStorage, generate_key};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Multipart, Query, State},
     http::StatusCode,
     routing::{get, post},
@@ -10,7 +11,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use tokio::fs;
 use validator::Validate;
 
 pub fn businesses_routes(pool: PgPool) -> Router {
@@ -272,88 +272,76 @@ async fn check_business_role(pool: &PgPool, user_id: i32) -> AppResult<()> {
 pub async fn upload_business_logo(
     CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     check_business_role(&pool, user_id).await?;
 
-    let dir = "uploads/businesses/business_logos";
-    let file_name = save_image_to_fs(multipart, dir)
-        .await
-        .map_err(AppError::Internal)?;
-    let logo_path = format!("{}/{}", dir, file_name);
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("businesses/logos", &ext);
+    let url = storage.save(&key, &data).await?;
 
     let result = sqlx::query!(
         "UPDATE businesses SET logo = $1 WHERE user_id = $2",
-        logo_path,
-        user_id
+        url, user_id
     )
     .execute(&pool)
     .await;
 
     if let Err(e) = result {
-        let _ = fs::remove_file(&logo_path).await;
+        let _ = storage.delete(&key).await;
         return Err(AppError::Database(e));
     }
 
-    Ok((StatusCode::OK, Json(json!({ "message": "Logo uploaded successfully", "logo": logo_path }))))
+    Ok((StatusCode::OK, Json(json!({ "message": "Logo uploaded successfully", "logo": url }))))
 }
 
 pub async fn upload_business_profile_picture(
     CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let dir = "uploads/businesses/business_profile_pictures";
-    let file_name = save_image_to_fs(multipart, dir)
-        .await
-        .map_err(AppError::Internal)?;
-    let path = format!("{}/{}", dir, file_name);
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("businesses/profile_pictures", &ext);
+    let url = storage.save(&key, &data).await?;
 
     let result = sqlx::query!(
         "UPDATE businesses SET profile_photo = $1 WHERE user_id = $2",
-        path,
-        user_id
+        url, user_id
     )
     .execute(&pool)
     .await;
 
     if let Err(e) = result {
-        let _ = fs::remove_file(&path).await;
+        let _ = storage.delete(&key).await;
         return Err(AppError::Database(e));
     }
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "Profile picture uploaded successfully", "profile_picture": path })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "message": "Profile picture uploaded successfully", "profile_picture": url }))))
 }
 
 pub async fn upload_business_cover_photo(
     CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let dir = "uploads/businesses/business_cover_photos";
-    let file_name = save_image_to_fs(multipart, dir)
-        .await
-        .map_err(AppError::Internal)?;
-    let path = format!("{}/{}", dir, file_name);
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("businesses/cover_photos", &ext);
+    let url = storage.save(&key, &data).await?;
 
     let result = sqlx::query!(
         "UPDATE businesses SET cover_photo = $1 WHERE user_id = $2",
-        path,
-        user_id
+        url, user_id
     )
     .execute(&pool)
     .await;
 
     if let Err(e) = result {
-        let _ = fs::remove_file(&path).await;
+        let _ = storage.delete(&key).await;
         return Err(AppError::Database(e));
     }
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "Cover photo uploaded successfully", "cover_photo": path })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "message": "Cover photo uploaded successfully", "cover_photo": url }))))
 }

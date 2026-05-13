@@ -1,8 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::image_upload::save_image_to_fs;
+use crate::utils::image_upload::parse_image_from_multipart;
+use crate::utils::storage::{SharedStorage, generate_key};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Multipart, Query, State},
     http::StatusCode,
     routing::{get, post},
@@ -11,7 +12,6 @@ use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use tokio::fs;
 use validator::Validate;
 
 pub fn service_providers_routes(pool: PgPool) -> Router {
@@ -228,62 +228,52 @@ pub async fn update_provider_profile(
 
 pub async fn upload_provider_profile_photo(
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     CurrentUser { user_id }: CurrentUser,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let dir = "uploads/providers/profile_photos";
-    let file_name = save_image_to_fs(multipart, dir)
-        .await
-        .map_err(AppError::Internal)?;
-    let file_url = format!("/uploads/providers/profile_photos/{}", file_name);
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("providers/profile_photos", &ext);
+    let url = storage.save(&key, &data).await?;
 
     let result = sqlx::query!(
         "UPDATE providers SET profile_photo = $1 WHERE user_id = $2",
-        file_url,
-        user_id
+        url, user_id
     )
     .execute(&pool)
     .await;
 
     if let Err(e) = result {
-        let _ = fs::remove_file(format!("{}/{}", dir, file_name)).await;
+        let _ = storage.delete(&key).await;
         return Err(AppError::Database(e));
     }
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "Profile photo uploaded successfully", "url": file_url })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "message": "Profile photo uploaded successfully", "url": url }))))
 }
 
 pub async fn upload_provider_cover_photo(
     State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
     CurrentUser { user_id }: CurrentUser,
     multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let dir = "uploads/providers/cover_photos";
-    let file_name = save_image_to_fs(multipart, dir)
-        .await
-        .map_err(AppError::Internal)?;
-    let file_url = format!("/uploads/providers/cover_photos/{}", file_name);
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("providers/cover_photos", &ext);
+    let url = storage.save(&key, &data).await?;
 
     let result = sqlx::query!(
         "UPDATE providers SET cover_photo = $1 WHERE user_id = $2",
-        file_url,
-        user_id
+        url, user_id
     )
     .execute(&pool)
     .await;
 
     if let Err(e) = result {
-        let _ = fs::remove_file(format!("{}/{}", dir, file_name)).await;
+        let _ = storage.delete(&key).await;
         return Err(AppError::Database(e));
     }
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "Cover photo uploaded successfully", "url": file_url })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "message": "Cover photo uploaded successfully", "url": url }))))
 }
 
 #[derive(Serialize, Debug, sqlx::FromRow)]

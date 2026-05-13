@@ -1,5 +1,6 @@
 use axum::http::header;
-use axum::{Router, routing::get};
+use axum::{Extension, Router, routing::get};
+use std::sync::Arc;
 use axum_server::bind;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -77,6 +78,8 @@ async fn main() {
         .expect("Failed to run database migrations");
     println!("Database migrations applied successfully");
 
+    let storage = Arc::new(utils::storage::AppStorage::init());
+
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
         .route("/dashboard", get(dashboard)) // Add the dashboard route
@@ -94,8 +97,9 @@ async fn main() {
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest("/services", services_routes(pool.clone())) // Mount the services routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
-        .layer(cors_layer) // ✅ This enables CORS for all origins
-        .layer(TraceLayer::new_for_http()) // ✅ This logs all requests
+        .layer(Extension(storage))
+        .layer(cors_layer)
+        .layer(TraceLayer::new_for_http())
         .route("/", get(root));
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
