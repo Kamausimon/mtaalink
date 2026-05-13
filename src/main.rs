@@ -71,6 +71,12 @@ async fn main() {
         .expect("Failed to create pool");
     println!("Database connection pool created successfully");
 
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run database migrations");
+    println!("Database migrations applied successfully");
+
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
         .route("/dashboard", get(dashboard)) // Add the dashboard route
