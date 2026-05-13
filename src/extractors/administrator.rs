@@ -17,7 +17,7 @@ pub async fn require_admin(
     next: Next,
 ) -> Result<Response, impl IntoResponse> {
     let admin_check = sqlx::query!(
-        "SELECT is_super_admin FROM admins WHERE id = $1",
+        "SELECT is_super_admin FROM admins WHERE user_id = $1",
         user_id
     )
     .fetch_optional(&pool)
