@@ -1,3 +1,4 @@
+use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::jwt::create_jwt;
 use argon2::{
@@ -5,20 +6,17 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core::OsRng},
 };
 use axum::{
-    Router,
-    extract::{Json, State},
+    Json, Router,
+    extract::{State},
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgPool;
-use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 use validator::Validate;
-
 
 pub fn auth_routes(pool: PgPool) -> Router {
     Router::new()
@@ -27,10 +25,8 @@ pub fn auth_routes(pool: PgPool) -> Router {
         .route("/me", get(me))
         .route("/forgot-password", post(forgot_password))
         .route("/reset-password", post(reset_password))
-        .with_state(pool.clone())
-    // You can add more routes here in the future
+        .with_state(pool)
 }
-
 
 #[derive(Deserialize, Validate)]
 pub struct RegisterInput {
@@ -44,94 +40,60 @@ pub struct RegisterInput {
     pub password: String,
     pub confirm_password: String,
 
-    pub role: String, // This can be "client", "provider", or "business"
+    pub role: String,
 
-    pub service_description: Option<String>, // Optional service description field
-    pub business_name: Option<String>,       // Optional business name field
+    pub service_description: Option<String>,
+    pub business_name: Option<String>,
 }
 
 fn normalize_email(email: &str) -> String {
-    // Convert to lowercase and trim whitespace
     let normalized = email.trim().to_lowercase();
-    
-    // Optional: Special handling for Gmail addresses
     if let Some(at_pos) = normalized.find('@') {
         let (username, domain) = normalized.split_at(at_pos);
         if domain == "@gmail.com" {
-            // Remove dots from Gmail username part
-            let username_no_dots = username.replace(".", "");
-            return username_no_dots + domain;
+            return username.replace(".", "") + domain;
         }
     }
-    
     normalized
 }
 
 fn normalize_username(username: &str) -> String {
-    // Convert to lowercase and trim whitespace
-   let mut normalized = username.trim().to_lowercase();
-
-   normalized
+    username.trim().to_lowercase()
 }
-
 
 pub async fn register(
     State(pool): State<PgPool>,
     Json(mut payload): Json<RegisterInput>,
-) -> impl IntoResponse {
-    //confirm that passwords match
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     payload.email = normalize_email(&payload.email);
     payload.username = normalize_username(&payload.username);
-    let mut tx: Transaction<'_, Postgres> = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"message": "Database transaction error"})),
-            );
-        }
-    };
 
     if payload.password != payload.confirm_password {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "message": "Passwords do not match" })),
-        );
+        return Err(AppError::BadRequest("Passwords do not match".to_string()));
     }
-    if let Err(e) = payload.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "message": "Validation failed", "errors": e.to_string() })),
-        );
-    }
+    payload.validate().map_err(|e| AppError::BadRequest(e.to_string()))?;
 
-    //check if the user already exists
     let existing_user = sqlx::query_scalar!(
         "SELECT 1 FROM users WHERE username = $1 OR email = $2",
         payload.username,
         payload.email
     )
     .fetch_optional(&pool)
-    .await
-    .unwrap();
+    .await?;
 
     if existing_user.is_some() {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({"message": "User with this username or email already exists"})),
-        );
+        return Err(AppError::Conflict(
+            "User with this username or email already exists".to_string(),
+        ));
     }
 
-    // 🔐 Hash the password using Argon2
     let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
+    let hashed_password = Argon2::default()
+        .hash_password(payload.password.as_bytes(), &salt)?
+        .to_string();
 
-    let hashed_password = argon2
-        .hash_password(payload.password.as_bytes(), &salt)
-        .unwrap()
-        .to_string(); // <- convert to string for storing
+    let mut tx = pool.begin().await?;
 
-    // 📥 Insert into DB
     let user = sqlx::query!(
         "INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id",
         payload.username,
@@ -139,135 +101,76 @@ pub async fn register(
         hashed_password
     )
     .fetch_one(&mut *tx)
-    .await;
- 
-    //if the user creation fails, rollback the transaction
-    if let Err(e) = user {
-        let _ = tx.rollback().await;
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": "Error creating user", "error": e.to_string()})),
-        );
-    }
- 
+    .await
+    .map_err(|e| {
+        AppError::Internal(format!("Error creating user: {}", e))
+    })?;
 
-    let user_id = match user {
-        Ok(record) => record.id,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"message": "Error creating user"})),
-            );
-        }
-    };
+    let user_id = user.id;
 
-    //attach transaction to the pool
     let role_result = match payload.role.as_str() {
         "client" => {
             sqlx::query!("INSERT INTO clients (user_id) VALUES ($1)", user_id)
                 .execute(&mut *tx)
                 .await
         }
-
-    "provider" => {
-    if payload.service_description.is_none()
-        || payload
-            .service_description
-            .as_ref()
-            .map_or(true, |s| s.trim().is_empty())
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"message": "Service description is required for provider role"})),
-        );
-    }
-
-    let service_description = payload.service_description.clone().unwrap();
-
-    let result = sqlx::query!(
-        "INSERT INTO providers (user_id, service_description) VALUES ($1, $2)",
-        user_id,
-        service_description
-    )
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = &result {
-        eprintln!("🚨 Provider insert failed: {}", e);
-    }
-
-    result
-}
-
-
-        "business" => {
- //ensure business_name is provided
-       if payload.business_name.is_none() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"message": "Business name is required for business role"})),
-                );
-            }
+        "provider" => {
+            let service_description = payload
+                .service_description
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| {
+                    AppError::BadRequest(
+                        "Service description is required for provider role".to_string(),
+                    )
+                })?
+                .to_string();
 
             sqlx::query!(
-                "INSERT INTO businesses (user_id, business_name) VALUES ($1, $2)",
+                "INSERT INTO providers (user_id, service_description) VALUES ($1, $2)",
                 user_id,
-                payload.business_name
+                service_description
             )
             .execute(&mut *tx)
             .await
         }
-        _ => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"message": "Invalid role"})),
-            );
+        "business" => {
+            let business_name = payload.business_name.as_deref().ok_or_else(|| {
+                AppError::BadRequest("Business name is required for business role".to_string())
+            })?;
+
+            sqlx::query!(
+                "INSERT INTO businesses (user_id, business_name) VALUES ($1, $2)",
+                user_id,
+                business_name
+            )
+            .execute(&mut *tx)
+            .await
         }
+        _ => return Err(AppError::BadRequest("Invalid role".to_string())),
     };
 
-    //update the user role in the users table
-    let role_update_result = sqlx::query!(
+    if let Err(e) = role_result {
+        let _ = tx.rollback().await;
+        return Err(AppError::Internal(format!("Error assigning role: {}", e)));
+    }
+
+    sqlx::query!(
         "UPDATE users SET role = $1::text WHERE id = $2",
         payload.role,
         user_id
     )
     .execute(&mut *tx)
-    .await;
+    .await
+    .map_err(|e| {
+        AppError::Internal(format!("Error updating user role: {}", e))
+    })?;
 
-    //if there is an error updating the user role, rollback the transaction
-if let Err(e) = role_update_result {
-    eprintln!("Role update error for role '{}': {:?}", payload.role, e);
-    let _ = tx.rollback().await;
-    return (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({
-            "message": "Error updating user role", 
-            "error": e.to_string(),
-            "role": payload.role
-        })),
-    );
-}
+    tx.commit().await?;
 
- //if the role insertion fails, rollback the transaction
-  if let Err(e) = role_result {
-        let _ = tx.rollback().await;
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": "Error assigning role", "error": e.to_string()})),
-        );
-    }
+    let token = create_jwt(&user_id.to_string())?;
 
-    //if all is well, commit the transaction
-    if let Err(e) = tx.commit().await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": "Error committing transaction", "error": e.to_string()})),
-        );
-    }
-    let token = create_jwt(&user_id.to_string());
-
-    //successfully registered
-    (
+    Ok((
         StatusCode::CREATED,
         Json(json!({
             "message": "User registered successfully",
@@ -276,7 +179,7 @@ if let Err(e) = role_update_result {
             "role": payload.role,
             "token": token,
         })),
-    )
+    ))
 }
 
 #[derive(Deserialize)]
@@ -288,44 +191,39 @@ pub struct LoginRequest {
 pub async fn login_handler(
     State(db): State<PgPool>,
     Json(mut payload): Json<LoginRequest>,
-) -> impl IntoResponse {
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     payload.email = normalize_email(&payload.email);
 
     let user = sqlx::query!(
-        "SELECT id, username, password,role FROM users WHERE email = $1",
+        "SELECT id, username, password, role FROM users WHERE email = $1",
         payload.email
     )
     .fetch_optional(&db)
-    .await
-    .unwrap();
+    .await?;
 
     if let Some(user) = user {
-        let parsed_hash = PasswordHash::new(&user.password).unwrap();
+        let parsed_hash = PasswordHash::new(&user.password)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
         if Argon2::default()
             .verify_password(payload.password.as_bytes(), &parsed_hash)
             .is_ok()
         {
-            let token = create_jwt(&user.id.to_string());
-            return (
+            let token = create_jwt(&user.id.to_string())?;
+            return Ok((
                 StatusCode::OK,
-                Json(serde_json::json!({
+                Json(json!({
                     "message": "Login successful",
                     "token": token,
                     "user_id": user.id,
                     "username": user.username,
-                    "role": user.role.unwrap_or("unknown".to_string()),
+                    "role": user.role.unwrap_or_else(|| "unknown".to_string()),
                 })),
-            );
+            ));
         }
     }
 
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(serde_json::json!({
-            "message": "Invalid email or password"
-        })),
-    )
+    Err(AppError::Unauthorized("Invalid email or password".to_string()))
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -339,44 +237,40 @@ struct UserWithRole {
 pub async fn me(
     CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
-) -> impl IntoResponse {
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let user = sqlx::query_as!(
         UserWithRole,
-        r#"SELECT 
-          u.id, 
+        r#"SELECT
+          u.id,
           u.email,
           u.username,
-          CASE 
+          CASE
             WHEN c.id IS NOT NULL THEN 'client'
             WHEN p.id IS NOT NULL THEN 'provider'
-            when b.id IS NOT NULL THEN 'business'
+            WHEN b.id IS NOT NULL THEN 'business'
             ELSE 'unknown'
-            END AS role
-            FROM users u
-            LEFT JOIN clients c ON u.id = c.user_id
-            LEFT JOIN providers p on u.id = p.user_id
-            Left JOIN businesses b ON u.id = b.user_id
-            WHERE u.id = $1
-            "#,
-        user_id.parse::<i32>().unwrap()
+          END AS role
+        FROM users u
+        LEFT JOIN clients c ON u.id = c.user_id
+        LEFT JOIN providers p ON u.id = p.user_id
+        LEFT JOIN businesses b ON u.id = b.user_id
+        WHERE u.id = $1"#,
+        user_id
     )
     .fetch_optional(&pool)
-    .await;
+    .await?;
 
     match user {
-        Ok(Some(user)) => Json(json!({
-            "id" : user_id,
-            "username" :  user.username,
-            "email" : user.email,
-            "role" : user.role.unwrap_or("unknown".to_string()),
-        })),
-
-        Ok(None) => Json(json!({
-            "message": "User not found"
-        })),
-        Err(_) => Json(json!({
-            "message": "Error fetching user data"
-        })),
+        Some(u) => Ok((
+            StatusCode::OK,
+            Json(json!({
+                "id": user_id,
+                "username": u.username,
+                "email": u.email,
+                "role": u.role.unwrap_or_else(|| "unknown".to_string()),
+            })),
+        )),
+        None => Err(AppError::NotFound("User not found".to_string())),
     }
 }
 
@@ -388,46 +282,36 @@ pub struct ForgotPasswordRequest {
 pub async fn forgot_password(
     State(pool): State<PgPool>,
     Json(payload): Json<ForgotPasswordRequest>,
-) -> impl IntoResponse {
-    // 1. Look up the user
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let user = sqlx::query!("SELECT id FROM users WHERE email = $1", payload.email)
         .fetch_optional(&pool)
-        .await;
+        .await?;
 
-    match user {
-        Ok(Some(user)) => {
-            // 2. Generate reset token
-            let token = Uuid::new_v4().to_string();
-            let expiry = (Utc::now() + Duration::minutes(15)).naive_utc();
+    // Always return the same message to prevent email enumeration
+    let Some(user) = user else {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({ "message": "If that email exists, a reset link has been sent" })),
+        ));
+    };
 
-            // 3. Store in password_resets
-            let _ = sqlx::query!(
-                "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)",
-                user.id,
-                token,
-                expiry
-            )
-            .execute(&pool)
-            .await;
+    let token = Uuid::new_v4().to_string();
+    let expiry = (Utc::now() + Duration::minutes(15)).naive_utc();
 
-            // 4. Return token for now (in real app you'd send via email)
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "message": "Password reset link sent",
-                    "token": token
-                })),
-            )
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "message": "User not found" })),
-        ),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": "Database error" })),
-        ),
-    }
+    sqlx::query!(
+        "INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)",
+        user.id,
+        token,
+        expiry
+    )
+    .execute(&pool)
+    .await?;
+
+    // TODO Phase 4: send token via email instead of returning it
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "message": "If that email exists, a reset link has been sent" })),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -440,65 +324,48 @@ pub struct ResetPasswordRequest {
 pub async fn reset_password(
     State(pool): State<PgPool>,
     Json(payload): Json<ResetPasswordRequest>,
-) -> impl IntoResponse {
-    //validate the passwords
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     if payload.password != payload.confirm_password {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "message": "Passwords do not match" })),
-        );
+        return Err(AppError::BadRequest("Passwords do not match".to_string()));
     }
 
-    //check if the token exists and is valid
     let record = sqlx::query!(
-        "SELECT user_id, expires_at FROM  password_resets WHERE token = $1",
+        "SELECT user_id, expires_at FROM password_resets WHERE token = $1",
         payload.token
     )
     .fetch_optional(&pool)
-    .await
-    .unwrap();
+    .await?;
 
-    let Some(reset) = record else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "message": "Invalid or expired token" })),
-        );
-    };
+    let reset = record.ok_or_else(|| {
+        AppError::NotFound("Invalid or expired token".to_string())
+    })?;
 
     if reset.expires_at < Utc::now().naive_utc() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "message": "Token has expired" })),
-        );
+        return Err(AppError::Unauthorized("Token has expired".to_string()));
     }
 
-    // Hash the new password
     let salt = SaltString::generate(&mut OsRng);
     let hashed_password = Argon2::default()
-        .hash_password(payload.password.as_bytes(), &salt)
-        .unwrap()
+        .hash_password(payload.password.as_bytes(), &salt)?
         .to_string();
 
-    //update the  user passwrd
-    let _ = sqlx::query!(
+    sqlx::query!(
         "UPDATE users SET password = $1 WHERE id = $2",
         hashed_password,
         reset.user_id
     )
     .execute(&pool)
-    .await;
+    .await?;
 
-    //delete the reset tokem
-    let _ = sqlx::query!(
-        "DELETE FROM password_resets where token = $1",
+    sqlx::query!(
+        "DELETE FROM password_resets WHERE token = $1",
         payload.token
     )
     .execute(&pool)
-    .await;
+    .await?;
 
-    //successfully reset the password
-    (
+    Ok((
         StatusCode::OK,
         Json(json!({ "message": "Password reset successfully" })),
-    )
+    ))
 }

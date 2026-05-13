@@ -16,10 +16,9 @@ pub async fn require_admin(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, impl IntoResponse> {
-    // Check if the user is an admin in the database
     let admin_check = sqlx::query!(
         "SELECT is_super_admin FROM admins WHERE id = $1",
-        user_id.parse::<i32>().unwrap()
+        user_id
     )
     .fetch_optional(&pool)
     .await;
