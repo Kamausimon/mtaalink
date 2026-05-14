@@ -2,7 +2,7 @@ use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -18,6 +18,7 @@ pub fn reviews_routes(pool: PgPool) -> Router {
         .route("/rankProviders", get(rank_providers))
         .route("/rankBusinesses", get(rank_businesses))
         .route("/getReviewAggById", get(get_review_agg_by_id))
+        .route("/:id/replyReview", post(reply_review))
         .with_state(pool)
 }
 
@@ -212,4 +213,68 @@ pub async fn get_review_agg_by_id(
     .await?;
 
     Ok((StatusCode::OK, Json(json!({ "aggregated_rating": result }))))
+}
+
+// ── Review replies ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ReplyPayload {
+    pub comment: String,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct ReviewReply {
+    pub id: i32,
+    pub review_id: i32,
+    pub reviewer_id: i32,
+    pub comment: String,
+    pub created_at: NaiveDateTime,
+}
+
+/// Providers and businesses can reply once to a review left on their profile.
+pub async fn reply_review(
+    State(pool): State<PgPool>,
+    Path(review_id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<ReplyPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    if payload.comment.trim().is_empty() {
+        return Err(AppError::BadRequest("Reply comment cannot be empty".to_string()));
+    }
+
+    // Verify the review exists
+    sqlx::query_scalar!("SELECT id FROM reviews WHERE id = $1", review_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Review not found".to_string()))?;
+
+    // Prevent duplicate replies from the same user
+    let existing = sqlx::query_scalar!(
+        "SELECT id FROM review_replies WHERE review_id = $1 AND reviewer_id = $2",
+        review_id,
+        user_id
+    )
+    .fetch_optional(&pool)
+    .await?;
+
+    if existing.is_some() {
+        return Err(AppError::Conflict("You have already replied to this review".to_string()));
+    }
+
+    let reply = sqlx::query_as!(
+        ReviewReply,
+        "INSERT INTO review_replies (review_id, reviewer_id, comment)
+         VALUES ($1, $2, $3)
+         RETURNING id, review_id, reviewer_id, comment, created_at",
+        review_id,
+        user_id,
+        payload.comment.trim()
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "message": "Reply posted successfully", "reply": reply })),
+    ))
 }

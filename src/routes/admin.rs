@@ -2,7 +2,7 @@ use crate::errors::{AppError, AppResult};
 use crate::extractors::administrator::require_admin;
 use axum::{
     Json, Router,
-    extract::{State},
+    extract::State,
     http::StatusCode,
     routing::{get, post},
 };
@@ -19,6 +19,10 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/delete_category", post(delete_category))
         .route("/users", get(get_users))
         .route("/delete_user", post(delete_user))
+        .route("/userAnalytics", get(get_user_analytics))
+        .route("/flagContent", post(flag_content))
+        .route("/resolveFlag", post(resolve_flag))
+        .route("/moderateReviews", get(moderate_reviews))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
 }
@@ -170,4 +174,156 @@ pub async fn delete_user(
         .await?;
 
     Ok((StatusCode::OK, Json(json!({ "message": "User deleted successfully" }))))
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+pub async fn get_user_analytics(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let clients = sqlx::query_scalar!("SELECT COUNT(*) FROM users WHERE role = 'client'")
+        .fetch_one(&pool).await?;
+    let providers = sqlx::query_scalar!("SELECT COUNT(*) FROM users WHERE role = 'provider'")
+        .fetch_one(&pool).await?;
+    let businesses = sqlx::query_scalar!("SELECT COUNT(*) FROM users WHERE role = 'business'")
+        .fetch_one(&pool).await?;
+
+    let pending = sqlx::query_scalar!("SELECT COUNT(*) FROM bookings WHERE status = 'pending'")
+        .fetch_one(&pool).await?;
+    let confirmed = sqlx::query_scalar!("SELECT COUNT(*) FROM bookings WHERE status = 'confirmed'")
+        .fetch_one(&pool).await?;
+    let completed = sqlx::query_scalar!("SELECT COUNT(*) FROM bookings WHERE status = 'completed'")
+        .fetch_one(&pool).await?;
+    let cancelled = sqlx::query_scalar!("SELECT COUNT(*) FROM bookings WHERE status = 'cancelled'")
+        .fetch_one(&pool).await?;
+
+    // New signups per day over the last 7 days
+    let signups = sqlx::query!(
+        r#"SELECT DATE(created_at) AS day, COUNT(*) AS count
+           FROM users
+           WHERE created_at >= NOW() - INTERVAL '7 days'
+           GROUP BY DATE(created_at)
+           ORDER BY day DESC"#
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let signups_by_day: Vec<_> = signups
+        .iter()
+        .map(|r| json!({ "day": r.day, "count": r.count }))
+        .collect();
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "users": {
+                "clients": clients,
+                "providers": providers,
+                "businesses": businesses,
+                "total": clients.unwrap_or(0) + providers.unwrap_or(0) + businesses.unwrap_or(0)
+            },
+            "bookings": {
+                "pending": pending,
+                "confirmed": confirmed,
+                "completed": completed,
+                "cancelled": cancelled
+            },
+            "signups_last_7_days": signups_by_day
+        })),
+    ))
+}
+
+// ── Content moderation ────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize, Debug)]
+pub struct FlagContentPayload {
+    pub target_type: String,
+    pub target_id: i32,
+    pub reason: String,
+}
+
+pub async fn flag_content(
+    State(pool): State<PgPool>,
+    Json(payload): Json<FlagContentPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    if payload.reason.trim().is_empty() {
+        return Err(AppError::BadRequest("Reason cannot be empty".to_string()));
+    }
+    if payload.target_id <= 0 {
+        return Err(AppError::BadRequest("Invalid target ID".to_string()));
+    }
+
+    let record = sqlx::query!(
+        "INSERT INTO content_flags (target_type, target_id, reason) VALUES ($1, $2, $3) RETURNING id",
+        payload.target_type,
+        payload.target_id,
+        payload.reason.trim()
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "message": "Content flagged successfully", "flag_id": record.id })),
+    ))
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ResolveFlagPayload {
+    pub flag_id: i32,
+}
+
+pub async fn resolve_flag(
+    State(pool): State<PgPool>,
+    Json(payload): Json<ResolveFlagPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let updated = sqlx::query!(
+        "UPDATE content_flags SET resolved = TRUE WHERE id = $1 AND resolved = FALSE",
+        payload.flag_id
+    )
+    .execute(&pool)
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound("Flag not found or already resolved".to_string()));
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Flag resolved successfully" }))))
+}
+
+#[derive(serde::Serialize, sqlx::FromRow, Debug)]
+pub struct FlaggedReview {
+    pub review_id: i32,
+    pub reviewer_id: i32,
+    pub target_type: String,
+    pub target_id: i32,
+    pub rating: i32,
+    pub comment: Option<String>,
+    pub flag_count: Option<i64>,
+}
+
+pub async fn moderate_reviews(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let reviews = sqlx::query_as!(
+        FlaggedReview,
+        r#"SELECT
+               r.id AS review_id,
+               r.reviewer_id,
+               r.target_type,
+               r.target_id,
+               r.rating,
+               r.comment,
+               COUNT(cf.id) AS flag_count
+           FROM reviews r
+           LEFT JOIN content_flags cf
+               ON cf.target_type = 'review' AND cf.target_id = r.id AND cf.resolved = FALSE
+           GROUP BY r.id
+           HAVING COUNT(cf.id) > 0
+           ORDER BY flag_count DESC, r.created_at DESC"#
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({ "flagged_reviews": reviews }))))
 }
