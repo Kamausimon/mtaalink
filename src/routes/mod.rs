@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod favorites;
 pub mod locations;
 pub mod messages;
+pub mod payments;
 pub mod posts;
 pub mod reviews;
 pub mod service_providers;
