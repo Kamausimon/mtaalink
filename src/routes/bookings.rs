@@ -1,5 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::sms::{SmsConfig, booking_confirmation_sms, booking_cancelled_sms,
+                        new_booking_received_sms, send_sms_best_effort};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -39,10 +41,24 @@ pub struct Booking {
     pub updated_at: Option<NaiveDateTime>,
 }
 
+/// Input for creating a booking — includes optional phone for SMS notification.
+#[derive(Deserialize, Debug)]
+pub struct CreateBookingInput {
+    pub target_type: String,
+    pub target_id: i32,
+    pub branch_id: Option<i32>,
+    pub service_id: Option<i32>,
+    pub service_description: String,
+    pub scheduled_time: chrono::NaiveDateTime,
+    /// Client's phone in any format (07XX / +2547XX / 2547XX).
+    /// If provided, an SMS confirmation is sent after booking.
+    pub client_phone: Option<String>,
+}
+
 pub async fn create_booking(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Json(payload): Json<Booking>,
+    Json(payload): Json<CreateBookingInput>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let target_type = payload.target_type.to_lowercase();
     if target_type != "business" && target_type != "provider" {
@@ -127,9 +143,60 @@ pub async fn create_booking(
     .fetch_one(&pool)
     .await?;
 
+    let booking_id = record.id;
+    let scheduled_str = payload.scheduled_time.format("%d %b %Y %H:%M").to_string();
+
+    // ── SMS notifications (best-effort, non-blocking) ─────────────────────────
+    if let Ok(sms_cfg) = SmsConfig::from_env() {
+        // 1. Confirmation SMS to client (if phone provided)
+        if let Some(ref phone) = payload.client_phone {
+            let msg = booking_confirmation_sms(
+                booking_id, &scheduled_str, payload.service_description.trim(),
+            );
+            send_sms_best_effort(&sms_cfg, phone, &msg).await;
+        }
+
+        // 2. New booking alert to provider/business
+        let provider_phone = match target_type.as_str() {
+            "provider" => sqlx::query_scalar!(
+                "SELECT phone_number FROM providers WHERE id = $1", target_id
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten(),
+            "business" => sqlx::query_scalar!(
+                "SELECT phone_number FROM businesses WHERE id = $1", target_id
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten(),
+            _ => None,
+        };
+
+        if let Some(pphone) = provider_phone {
+            let client_name = sqlx::query_scalar!(
+                "SELECT username FROM users WHERE id = $1", user_id
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "a client".to_string());
+
+            let msg = new_booking_received_sms(
+                booking_id, &client_name, payload.service_description.trim(),
+            );
+            send_sms_best_effort(&sms_cfg, &pphone, &msg).await;
+        }
+    }
+
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "message": "Booking created successfully", "booking_id": record.id })),
+        Json(json!({ "message": "Booking created successfully", "booking_id": booking_id })),
     ))
 }
 
@@ -305,15 +372,56 @@ pub async fn update_booking(
         return Err(AppError::Forbidden("You don't have permission to update this booking".to_string()));
     }
 
+    let new_status = payload.status.to_lowercase();
+
     sqlx::query!(
         "UPDATE bookings SET status = $1 WHERE id = $2 AND target_type = $3 AND target_id = $4",
-        payload.status.to_lowercase(),
+        new_status,
         id,
         target_type,
         params.target_id
     )
     .execute(&pool)
     .await?;
+
+    // SMS to client when booking is confirmed or cancelled
+    if new_status == "confirmed" || new_status == "cancelled" {
+        if let Ok(sms_cfg) = SmsConfig::from_env() {
+            // Get client phone from most recent payment for this booking
+            let client_phone = sqlx::query_scalar!(
+                "SELECT phone_number FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1",
+                id
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
+
+            if let Some(phone) = client_phone {
+                let msg = if new_status == "confirmed" {
+                    let booking = sqlx::query!(
+                        "SELECT service_description, scheduled_time FROM bookings WHERE id = $1", id
+                    )
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten();
+
+                    booking.map(|b| booking_confirmation_sms(
+                        id,
+                        &b.scheduled_time.format("%d %b %Y %H:%M").to_string(),
+                        &b.service_description.unwrap_or_default(),
+                    ))
+                } else {
+                    Some(booking_cancelled_sms(id, "Cancelled by provider"))
+                };
+
+                if let Some(m) = msg {
+                    send_sms_best_effort(&sms_cfg, &phone, &m).await;
+                }
+            }
+        }
+    }
 
     Ok((StatusCode::OK, Json(json!({ "message": "Status updated successfully" }))))
 }

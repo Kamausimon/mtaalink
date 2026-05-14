@@ -1,6 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::mpesa::{MpesaConfig, MpesaCallback, normalize_phone, stk_push};
+use crate::utils::sms::{SmsConfig, payment_success_sms, payment_failed_sms, send_sms_best_effort};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -194,6 +195,36 @@ pub async fn mpesa_callback(
         cb.result_code,
         cb.result_desc
     );
+
+    // SMS receipt/failure notification (best-effort)
+    if let Ok(sms_cfg) = SmsConfig::from_env() {
+        let payment_row = sqlx::query!(
+            "SELECT phone_number, amount, booking_id FROM payments WHERE checkout_request_id = $1",
+            cb.checkout_request_id
+        )
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+
+        if let Some(p) = payment_row {
+            let msg = if status == "completed" {
+                let receipt = cb
+                    .callback_metadata
+                    .as_ref()
+                    .and_then(|m| m.receipt_number())
+                    .unwrap_or_else(|| "N/A".to_string());
+                payment_success_sms(
+                    &p.amount.to_string(),
+                    &receipt,
+                    p.booking_id.unwrap_or(0),
+                )
+            } else {
+                payment_failed_sms(p.booking_id.unwrap_or(0))
+            };
+            send_sms_best_effort(&sms_cfg, &p.phone_number, &msg).await;
+        }
+    }
 
     (
         StatusCode::OK,
