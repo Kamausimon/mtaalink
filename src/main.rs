@@ -1,6 +1,9 @@
 use axum::http::header;
-use axum::{Extension, Router, routing::get};
+use axum::response::IntoResponse;
+use axum::{Extension, Json, Router, routing::get};
+use serde_json::json;
 use std::sync::Arc;
+use tower_governor::{GovernorLayer, errors::GovernorError, governor::GovernorConfigBuilder};
 use axum_server::bind;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -80,6 +83,21 @@ async fn main() {
 
     let storage = Arc::new(utils::storage::AppStorage::init());
 
+    // Global: 100 requests per minute per IP (burst 100, then 1 per 600 ms)
+    let global_conf = {
+        let mut b = GovernorConfigBuilder::default();
+        b.per_millisecond(600);
+        b.burst_size(100);
+        b.error_handler(|_: GovernorError| {
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "message": "Too many requests" })),
+            )
+                .into_response()
+        });
+        Arc::new(b.finish().expect("valid rate limit config"))
+    };
+
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
         .route("/dashboard", get(dashboard)) // Add the dashboard route
@@ -97,6 +115,7 @@ async fn main() {
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest("/services", services_routes(pool.clone())) // Mount the services routes
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
+        .layer(GovernorLayer { config: global_conf })
         .layer(Extension(storage))
         .layer(cors_layer)
         .layer(TraceLayer::new_for_http())
