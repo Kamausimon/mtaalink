@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::notifications::{notify_best_effort, notify_target_owner};
 use crate::utils::sms::{SmsConfig, booking_confirmation_sms, booking_cancelled_sms,
                         new_booking_received_sms, send_sms_best_effort};
 use axum::{
@@ -193,6 +194,14 @@ pub async fn create_booking(
             send_sms_best_effort(&sms_cfg, &pphone, &msg).await;
         }
     }
+
+    // In-app notification to the provider/business owner
+    notify_target_owner(
+        &pool, &target_type, target_id,
+        "booking_created", "New Booking",
+        &format!("You have a new booking #{} for {}", booking_id, payload.service_description.trim()),
+        Some("booking"), Some(booking_id),
+    ).await;
 
     Ok((
         StatusCode::CREATED,
@@ -420,6 +429,26 @@ pub async fn update_booking(
                     send_sms_best_effort(&sms_cfg, &phone, &m).await;
                 }
             }
+        }
+    }
+
+    // In-app notification to the client
+    if new_status == "confirmed" || new_status == "cancelled" {
+        let client_id = sqlx::query_scalar!(
+            "SELECT client_id FROM bookings WHERE id = $1", id
+        )
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten();
+
+        if let Some(cid) = client_id {
+            let (title, body) = if new_status == "confirmed" {
+                ("Booking Confirmed", format!("Your booking #{} has been confirmed", id))
+            } else {
+                ("Booking Cancelled", format!("Your booking #{} has been cancelled", id))
+            };
+            notify_best_effort(&pool, cid, &new_status, title, &body, Some("booking"), Some(id)).await;
         }
     }
 

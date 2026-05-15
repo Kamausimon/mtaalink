@@ -1,6 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::mpesa::{MpesaConfig, MpesaCallback, normalize_phone, stk_push};
+use crate::utils::notifications::{notify_best_effort, notify_target_owner};
 use crate::utils::sms::{SmsConfig, payment_success_sms, payment_failed_sms, send_sms_best_effort};
 use axum::{
     Json, Router,
@@ -223,6 +224,37 @@ pub async fn mpesa_callback(
                 payment_failed_sms(p.booking_id.unwrap_or(0))
             };
             send_sms_best_effort(&sms_cfg, &p.phone_number, &msg).await;
+        }
+    }
+
+    // In-app notification (best-effort)
+    if let Some(p) = sqlx::query!(
+        "SELECT b.id AS booking_id, b.client_id, b.target_type, b.target_id
+         FROM bookings b
+         JOIN payments p ON p.booking_id = b.id
+         WHERE p.checkout_request_id = $1
+         LIMIT 1",
+        cb.checkout_request_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()
+    {
+        if status == "completed" {
+            notify_target_owner(
+                &pool, &p.target_type, p.target_id,
+                "payment_received", "Payment Received",
+                "A payment was completed for one of your bookings",
+                Some("booking"), Some(p.booking_id),
+            ).await;
+        } else {
+            notify_best_effort(
+                &pool, p.client_id,
+                "payment_failed", "Payment Failed",
+                &format!("Payment for booking #{} could not be processed. Please try again.", p.booking_id),
+                Some("booking"), Some(p.booking_id),
+            ).await;
         }
     }
 

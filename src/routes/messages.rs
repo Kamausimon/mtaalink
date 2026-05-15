@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::notifications::notify_best_effort;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -82,6 +83,13 @@ pub async fn send_message(
     .await?;
 
     tx.commit().await?;
+
+    notify_best_effort(
+        &pool, payload.receiver_id,
+        "new_message", "New Message",
+        "You have a new message",
+        Some("message"), Some(message.id),
+    ).await;
 
     Ok((StatusCode::CREATED, Json(json!({ "message": message }))))
 }
