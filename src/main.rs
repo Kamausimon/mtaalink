@@ -41,6 +41,7 @@ use routes::notifications::notification_routes;
 use routes::payments::payment_routes;
 use routes::search::search_routes;
 use routes::services::services_routes;
+use routes::wallet::wallet_routes;
 
 #[tokio::main]
 async fn main() {
@@ -126,6 +127,7 @@ async fn main() {
         .nest("/search", search_routes(pool.clone()))
         .nest("/analytics", analytics_routes(pool.clone()))
         .nest("/availability", availability_routes(pool.clone()))
+        .nest("/wallet", wallet_routes(pool.clone()))
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(GovernorLayer { config: global_conf })
         .layer(Extension(storage))

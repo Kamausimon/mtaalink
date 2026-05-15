@@ -2,6 +2,7 @@ use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::mpesa::{MpesaConfig, MpesaCallback, normalize_phone, stk_push};
 use crate::utils::notifications::{notify_best_effort, notify_target_owner};
+use crate::utils::wallet::credit_wallet_best_effort;
 use crate::utils::sms::{SmsConfig, payment_success_sms, payment_failed_sms, send_sms_best_effort};
 use axum::{
     Json, Router,
@@ -175,7 +176,7 @@ pub async fn mpesa_callback(
         );
     }
 
-    // If payment succeeded, mark the booking as confirmed
+    // If payment succeeded, mark the booking as confirmed and credit the wallet
     if status == "completed" {
         let _ = sqlx::query!(
             r#"UPDATE bookings b
@@ -188,6 +189,31 @@ pub async fn mpesa_callback(
         )
         .execute(&pool)
         .await;
+
+        // Credit the provider/business wallet with the payment amount
+        if let Some(row) = sqlx::query!(
+            r#"SELECT b.target_type, b.target_id, p.amount, p.id AS payment_id, b.id AS booking_id
+               FROM payments p
+               JOIN bookings b ON p.booking_id = b.id
+               WHERE p.checkout_request_id = $1"#,
+            cb.checkout_request_id
+        )
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+        {
+            credit_wallet_best_effort(
+                &pool,
+                &row.target_type,
+                row.target_id,
+                &row.amount,
+                &format!("Payment for booking #{}", row.booking_id),
+                Some(row.booking_id),
+                Some(row.payment_id),
+            )
+            .await;
+        }
     }
 
     tracing::info!(
