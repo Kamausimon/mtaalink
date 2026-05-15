@@ -41,6 +41,8 @@ pub struct ReviewResponse {
     rating: i32,
     comment: String,
     created_at: NaiveDateTime,
+    /// True when the review is backed by a completed booking.
+    verified: bool,
 }
 
 pub async fn create_reviews(
@@ -49,8 +51,11 @@ pub async fn create_reviews(
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<Review>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    if payload.comment.is_empty() {
+    if payload.comment.trim().is_empty() {
         return Err(AppError::BadRequest("Comment cannot be empty".to_string()));
+    }
+    if !(1..=5).contains(&payload.rating) {
+        return Err(AppError::BadRequest("Rating must be between 1 and 5".to_string()));
     }
 
     let target_type = match params.target_type.to_lowercase().as_str() {
@@ -68,10 +73,9 @@ pub async fn create_reviews(
         "provider" => sqlx::query_scalar!("SELECT id FROM providers WHERE id = $1", target_id)
             .fetch_optional(&pool)
             .await?,
-        "business" => sqlx::query_scalar!("SELECT id FROM businesses WHERE id = $1", target_id)
+        _ => sqlx::query_scalar!("SELECT id FROM businesses WHERE id = $1", target_id)
             .fetch_optional(&pool)
             .await?,
-        _ => return Err(AppError::BadRequest("Invalid target type".to_string())),
     };
 
     if target_exists.is_none() {
@@ -88,11 +92,16 @@ pub async fn create_reviews(
     .await?;
 
     if existing_review.is_some() {
-        return Err(AppError::Conflict("You have already reviewed this service provider".to_string()));
+        return Err(AppError::Conflict("You have already reviewed this provider or business".to_string()));
     }
 
-    let interaction_exists = sqlx::query_scalar!(
-        "SELECT id FROM interactions WHERE user_id = $1 AND target_type = $2 AND target_id = $3",
+    // Only clients with a completed booking may leave a review
+    let verified_booking_id = sqlx::query_scalar!(
+        r#"SELECT id FROM bookings
+           WHERE client_id = $1 AND target_type = $2 AND target_id = $3
+             AND status = 'completed'
+           ORDER BY updated_at DESC
+           LIMIT 1"#,
         user_id,
         target_type,
         target_id
@@ -100,20 +109,21 @@ pub async fn create_reviews(
     .fetch_optional(&pool)
     .await?;
 
-    if interaction_exists.is_none() {
+    if verified_booking_id.is_none() {
         return Err(AppError::Forbidden(
-            "You can only review service providers or businesses you have interacted with".to_string(),
+            "You can only review a provider or business after completing a booking with them".to_string(),
         ));
     }
 
     let review = sqlx::query!(
-        "INSERT INTO reviews (reviewer_id, target_type, target_id, rating, comment)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        r#"INSERT INTO reviews (reviewer_id, target_type, target_id, rating, comment, verified_booking_id)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"#,
         user_id,
         target_type,
         target_id,
         payload.rating,
-        payload.comment
+        payload.comment.trim(),
+        verified_booking_id
     )
     .fetch_one(&pool)
     .await?;
@@ -123,9 +133,7 @@ pub async fn create_reviews(
         Json(json!({
             "message": "Review created successfully",
             "review_id": review.id,
-            "reviewer_id": user_id,
-            "target_type": target_type,
-            "target_id": target_id
+            "verified": true,
         })),
     ))
 }
@@ -143,9 +151,11 @@ pub async fn get_reviews(
     }
 
     let reviews = sqlx::query_as::<sqlx::Postgres, ReviewResponse>(
-        "SELECT id, reviewer_id, rating, comment, created_at
-         FROM reviews WHERE target_type = $1 AND target_id = $2
-         ORDER BY created_at DESC",
+        r#"SELECT id, reviewer_id, rating, comment, created_at,
+                  (verified_booking_id IS NOT NULL) AS verified
+           FROM reviews
+           WHERE target_type = $1 AND target_id = $2
+           ORDER BY verified DESC, created_at DESC"#,
     )
     .bind(target_type)
     .bind(params.target_id)
