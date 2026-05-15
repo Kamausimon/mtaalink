@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::notifications::{notify_best_effort, notify_target_owner};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -127,6 +128,13 @@ pub async fn create_reviews(
     )
     .fetch_one(&pool)
     .await?;
+
+    notify_target_owner(
+        &pool, &target_type, target_id,
+        "new_review", "New Review",
+        &format!("You received a {}-star review", payload.rating),
+        Some("review"), Some(review.id),
+    ).await;
 
     Ok((
         StatusCode::CREATED,
@@ -282,6 +290,24 @@ pub async fn reply_review(
     )
     .fetch_one(&pool)
     .await?;
+
+    // Notify the original reviewer that their review received a reply
+    let reviewer_id = sqlx::query_scalar!(
+        "SELECT reviewer_id FROM reviews WHERE id = $1", review_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(rid) = reviewer_id {
+        notify_best_effort(
+            &pool, rid,
+            "review_reply", "Reply to Your Review",
+            "Someone replied to your review",
+            Some("review"), Some(review_id),
+        ).await;
+    }
 
     Ok((
         StatusCode::CREATED,

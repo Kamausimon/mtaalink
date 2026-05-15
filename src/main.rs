@@ -37,6 +37,7 @@ use routes::posts::posts_routes;
 use routes::reviews::reviews_routes;
 use routes::service_providers::service_providers_routes;
 use utils::attachments::attachments_routes;
+use routes::notifications::notification_routes;
 use routes::payments::payment_routes;
 use routes::search::search_routes;
 use routes::services::services_routes;
@@ -119,6 +120,7 @@ async fn main() {
         .nest("/attachments", attachments_routes(pool.clone())) // Mount the attachments routes
         .nest("/services", services_routes(pool.clone()))
         .nest("/payments", payment_routes(pool.clone()))
+        .nest("/notifications", notification_routes(pool.clone()))
         .nest("/search", search_routes(pool.clone()))
         .nest("/analytics", analytics_routes(pool.clone()))
         .nest("/availability", availability_routes(pool.clone()))
