@@ -6,4 +6,5 @@ pub mod mpesa;
 pub mod notifications;
 pub mod reminders;
 pub mod sms;
+pub mod wallet;
 pub mod storage;
