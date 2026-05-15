@@ -22,6 +22,7 @@ mod utils;
 pub use errors::{AppError, AppResult};
 
 use routes::admin::admin_routes;
+use routes::analytics::analytics_routes;
 use routes::auth::auth_routes;
 use routes::bookings::booking_routes;
 use routes::businesses::businesses_routes;
@@ -118,6 +119,7 @@ async fn main() {
         .nest("/services", services_routes(pool.clone()))
         .nest("/payments", payment_routes(pool.clone()))
         .nest("/search", search_routes(pool.clone()))
+        .nest("/analytics", analytics_routes(pool.clone()))
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(GovernorLayer { config: global_conf })
         .layer(Extension(storage))
