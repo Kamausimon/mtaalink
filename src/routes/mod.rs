@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod analytics;
 pub mod auth;
+pub mod availability;
 pub mod bookings;
 pub mod businesses;
 pub mod categories;
