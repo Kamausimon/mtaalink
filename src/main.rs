@@ -88,6 +88,8 @@ async fn main() {
 
     let storage = Arc::new(utils::storage::AppStorage::init());
 
+    utils::reminders::start_reminder_task(pool.clone());
+
     // Global: 100 requests per minute per IP (burst 100, then 1 per 600 ms)
     let global_conf = {
         let mut b = GovernorConfigBuilder::default();
