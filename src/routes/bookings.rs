@@ -1,10 +1,11 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::notifications::{notify_best_effort, notify_target_owner};
+use crate::utils::notifications::{notify_and_push, notify_target_owner_and_push};
 use crate::utils::sms::{SmsConfig, booking_confirmation_sms, booking_cancelled_sms,
                         new_booking_received_sms, send_sms_best_effort};
+use crate::utils::ws_state::WsConnections;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
@@ -58,6 +59,7 @@ pub struct CreateBookingInput {
 
 pub async fn create_booking(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<CreateBookingInput>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
@@ -195,9 +197,9 @@ pub async fn create_booking(
         }
     }
 
-    // In-app notification to the provider/business owner
-    notify_target_owner(
-        &pool, &target_type, target_id,
+    // In-app notification + WS push to the provider/business owner
+    notify_target_owner_and_push(
+        &pool, &ws_conns, &target_type, target_id,
         "booking_created", "New Booking",
         &format!("You have a new booking #{} for {}", booking_id, payload.service_description.trim()),
         Some("booking"), Some(booking_id),
@@ -352,6 +354,7 @@ pub struct UpdateQuery {
 
 pub async fn update_booking(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     Path(id): Path<i32>,
     Query(params): Query<UpdateQuery>,
     CurrentUser { user_id }: CurrentUser,
@@ -448,7 +451,7 @@ pub async fn update_booking(
             } else {
                 ("Booking Cancelled", format!("Your booking #{} has been cancelled", id))
             };
-            notify_best_effort(&pool, cid, &new_status, title, &body, Some("booking"), Some(id)).await;
+            notify_and_push(&pool, &ws_conns, cid, &new_status, title, &body, Some("booking"), Some(id)).await;
         }
     }
 
