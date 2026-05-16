@@ -1,11 +1,12 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::mpesa::{MpesaConfig, MpesaCallback, normalize_phone, stk_push};
-use crate::utils::notifications::{notify_best_effort, notify_target_owner};
+use crate::utils::notifications::{notify_and_push, notify_target_owner_and_push};
 use crate::utils::wallet::credit_wallet_best_effort;
 use crate::utils::sms::{SmsConfig, payment_success_sms, payment_failed_sms, send_sms_best_effort};
+use crate::utils::ws_state::WsConnections;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
@@ -136,6 +137,7 @@ pub async fn initiate_payment(
 
 pub async fn mpesa_callback(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     Json(payload): Json<MpesaCallback>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let cb = &payload.body.stk_callback;
@@ -268,15 +270,15 @@ pub async fn mpesa_callback(
     .flatten()
     {
         if status == "completed" {
-            notify_target_owner(
-                &pool, &p.target_type, p.target_id,
+            notify_target_owner_and_push(
+                &pool, &ws_conns, &p.target_type, p.target_id,
                 "payment_received", "Payment Received",
                 "A payment was completed for one of your bookings",
                 Some("booking"), Some(p.booking_id),
             ).await;
         } else {
-            notify_best_effort(
-                &pool, p.client_id,
+            notify_and_push(
+                &pool, &ws_conns, p.client_id,
                 "payment_failed", "Payment Failed",
                 &format!("Payment for booking #{} could not be processed. Please try again.", p.booking_id),
                 Some("booking"), Some(p.booking_id),

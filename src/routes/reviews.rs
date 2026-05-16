@@ -1,8 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::notifications::{notify_best_effort, notify_target_owner};
+use crate::utils::notifications::{notify_and_push, notify_target_owner_and_push};
+use crate::utils::ws_state::WsConnections;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
@@ -48,6 +49,7 @@ pub struct ReviewResponse {
 
 pub async fn create_reviews(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     Query(params): Query<ReviewQuery>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<Review>,
@@ -129,8 +131,8 @@ pub async fn create_reviews(
     .fetch_one(&pool)
     .await?;
 
-    notify_target_owner(
-        &pool, &target_type, target_id,
+    notify_target_owner_and_push(
+        &pool, &ws_conns, &target_type, target_id,
         "new_review", "New Review",
         &format!("You received a {}-star review", payload.rating),
         Some("review"), Some(review.id),
@@ -252,6 +254,7 @@ pub struct ReviewReply {
 /// Providers and businesses can reply once to a review left on their profile.
 pub async fn reply_review(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     Path(review_id): Path<i32>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<ReplyPayload>,
@@ -301,8 +304,8 @@ pub async fn reply_review(
     .flatten();
 
     if let Some(rid) = reviewer_id {
-        notify_best_effort(
-            &pool, rid,
+        notify_and_push(
+            &pool, &ws_conns, rid,
             "review_reply", "Reply to Your Review",
             "Someone replied to your review",
             Some("review"), Some(review_id),

@@ -1,8 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::administrator::require_admin;
+use bigdecimal::BigDecimal;
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -23,6 +24,9 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/flagContent", post(flag_content))
         .route("/resolveFlag", post(resolve_flag))
         .route("/moderateReviews", get(moderate_reviews))
+        .route("/payouts", get(list_pending_payouts))
+        .route("/payouts/:id/approve", post(approve_payout))
+        .route("/payouts/:id/reject", post(reject_payout))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
 }
@@ -326,4 +330,115 @@ pub async fn moderate_reviews(
     .await?;
 
     Ok((StatusCode::OK, Json(json!({ "flagged_reviews": reviews }))))
+}
+
+// ── Payout management ─────────────────────────────────────────────────────────
+
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct PayoutRequestRow {
+    pub id: i32,
+    pub wallet_id: i32,
+    pub amount: BigDecimal,
+    pub phone_number: String,
+    pub status: String,
+    pub notes: Option<String>,
+    pub target_type: Option<String>,
+    pub target_id: Option<i32>,
+}
+
+pub async fn list_pending_payouts(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let payouts = sqlx::query_as::<_, PayoutRequestRow>(
+        r#"SELECT pr.id, pr.wallet_id, pr.amount, pr.phone_number, pr.status, pr.notes,
+                  w.target_type, w.target_id
+           FROM payout_requests pr
+           JOIN wallets w ON pr.wallet_id = w.id
+           WHERE pr.status = 'pending'
+           ORDER BY pr.created_at ASC"#,
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({ "pending_payouts": payouts }))))
+}
+
+#[derive(Deserialize)]
+pub struct PayoutDecision {
+    pub notes: Option<String>,
+}
+
+pub async fn approve_payout(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    Json(payload): Json<PayoutDecision>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let updated = sqlx::query!(
+        r#"UPDATE payout_requests
+           SET status = 'approved', notes = $1, updated_at = NOW()
+           WHERE id = $2 AND status = 'pending'"#,
+        payload.notes,
+        id
+    )
+    .execute(&pool)
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound(
+            "Payout request not found or already processed".to_string(),
+        ));
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Payout approved" }))))
+}
+
+pub async fn reject_payout(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    Json(payload): Json<PayoutDecision>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    // Fetch the payout to get wallet_id and amount for the refund
+    let payout = sqlx::query!(
+        "SELECT wallet_id, amount FROM payout_requests WHERE id = $1 AND status = 'pending'",
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Payout request not found or already processed".to_string()))?;
+
+    let mut tx = pool.begin().await?;
+
+    // Refund the balance
+    sqlx::query!(
+        r#"UPDATE wallets
+           SET balance = balance + $1, total_paid_out = total_paid_out - $1, updated_at = NOW()
+           WHERE id = $2"#,
+        payout.amount,
+        payout.wallet_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert a credit transaction for the refund
+    sqlx::query!(
+        r#"INSERT INTO wallet_transactions (wallet_id, txn_type, amount, description)
+           VALUES ($1, 'credit', $2, 'Payout rejected — balance refunded')"#,
+        payout.wallet_id,
+        payout.amount
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Mark payout as rejected
+    sqlx::query!(
+        "UPDATE payout_requests SET status = 'rejected', notes = $1, updated_at = NOW() WHERE id = $2",
+        payload.notes,
+        id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Payout rejected and balance refunded" }))))
 }
