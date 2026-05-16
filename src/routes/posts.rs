@@ -1,10 +1,12 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::notifications::notify_and_push;
+use crate::utils::ws_state::WsConnections;
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,10 @@ pub fn posts_routes(pool: PgPool) -> Router {
         .route("/business/:id/posts", get(get_posts_by_business_id))
         .route("/deletePost/:id", post(delete_post))
         .route("/updatePost/:id", post(update_post_and_attachments))
+        // Interactions
+        .route("/:id/like", post(like_post).delete(unlike_post))
+        .route("/:id/comments", get(get_comments).post(add_comment))
+        .route("/:id/comments/:comment_id", delete(delete_comment))
         .with_state(pool)
 }
 
@@ -36,6 +42,7 @@ pub struct CreatePost {
 
 pub async fn create_posts(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<CreatePost>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
@@ -82,6 +89,30 @@ pub async fn create_posts(
     )
     .fetch_one(&pool)
     .await?;
+
+    // Notify all users who have favourited this provider/business
+    let (target_type, target_id) = match (payload.provider_id, payload.business_id) {
+        (Some(pid), _) => ("provider", pid),
+        (_, Some(bid)) => ("business", bid),
+        _ => return Ok((StatusCode::CREATED, Json(json!({ "post_id": post.id })))),
+    };
+
+    let favouriters: Vec<i32> = sqlx::query_scalar!(
+        "SELECT user_id FROM favorites WHERE target_type = $1 AND target_id = $2",
+        target_type, target_id
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+
+    for uid in favouriters {
+        notify_and_push(
+            &pool, &ws_conns, uid,
+            "new_post", "New Post",
+            &format!("A provider you follow posted: {}", payload.title.trim()),
+            Some("post"), Some(post.id),
+        ).await;
+    }
 
     Ok((StatusCode::CREATED, Json(json!({ "post_id": post.id }))))
 }
@@ -230,4 +261,143 @@ pub async fn update_post_and_attachments(
     tx.commit().await?;
 
     Ok((StatusCode::OK, Json(json!({ "message": "Post and attachments updated successfully" }))))
+}
+
+// ── Likes ─────────────────────────────────────────────────────────────────────
+
+pub async fn like_post(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Path(post_id): Path<i32>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_scalar!("SELECT id FROM posts WHERE id = $1", post_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
+
+    sqlx::query!(
+        "INSERT INTO post_likes (user_id, post_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        user_id, post_id
+    )
+    .execute(&pool)
+    .await?;
+
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM post_likes WHERE post_id = $1", post_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Post liked", "likes": count }))))
+}
+
+pub async fn unlike_post(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Path(post_id): Path<i32>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    sqlx::query!(
+        "DELETE FROM post_likes WHERE user_id = $1 AND post_id = $2",
+        user_id, post_id
+    )
+    .execute(&pool)
+    .await?;
+
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM post_likes WHERE post_id = $1", post_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Post unliked", "likes": count }))))
+}
+
+// ── Comments ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct CommentRow {
+    pub id: i32,
+    pub user_id: i32,
+    pub username: String,
+    pub comment: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CommentInput {
+    pub comment: String,
+}
+
+pub async fn get_comments(
+    State(pool): State<PgPool>,
+    Path(post_id): Path<i32>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let comments = sqlx::query_as::<_, CommentRow>(
+        r#"SELECT pc.id, pc.user_id, u.username, pc.comment, pc.created_at
+           FROM post_comments pc
+           JOIN users u ON u.id = pc.user_id
+           WHERE pc.post_id = $1
+           ORDER BY pc.created_at ASC"#,
+    )
+    .bind(post_id)
+    .fetch_all(&pool)
+    .await?;
+
+    let like_count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM post_likes WHERE post_id = $1", post_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .unwrap_or(0);
+
+    Ok((StatusCode::OK, Json(json!({
+        "comments": comments,
+        "likes": like_count,
+    }))))
+}
+
+pub async fn add_comment(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Path(post_id): Path<i32>,
+    Json(payload): Json<CommentInput>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    if payload.comment.trim().is_empty() {
+        return Err(AppError::BadRequest("Comment cannot be empty".to_string()));
+    }
+
+    sqlx::query_scalar!("SELECT id FROM posts WHERE id = $1", post_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
+
+    let comment = sqlx::query!(
+        "INSERT INTO post_comments (post_id, user_id, comment) VALUES ($1, $2, $3) RETURNING id",
+        post_id, user_id, payload.comment.trim()
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "message": "Comment added", "comment_id": comment.id }))))
+}
+
+pub async fn delete_comment(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Path((post_id, comment_id)): Path<(i32, i32)>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let deleted = sqlx::query!(
+        "DELETE FROM post_comments WHERE id = $1 AND post_id = $2 AND user_id = $3",
+        comment_id, post_id, user_id
+    )
+    .execute(&pool)
+    .await?;
+
+    if deleted.rows_affected() == 0 {
+        return Err(AppError::NotFound("Comment not found or not yours".to_string()));
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Comment deleted" }))))
 }
