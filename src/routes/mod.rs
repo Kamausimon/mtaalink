@@ -11,6 +11,7 @@ pub mod favorites;
 pub mod locations;
 pub mod messages;
 pub mod notifications;
+pub mod packages;
 pub mod payments;
 pub mod posts;
 pub mod reviews;

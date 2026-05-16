@@ -27,6 +27,7 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/payouts", get(list_pending_payouts))
         .route("/payouts/:id/approve", post(approve_payout))
         .route("/payouts/:id/reject", post(reject_payout))
+        .route("/dashboard", get(platform_dashboard))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
 }
@@ -441,4 +442,83 @@ pub async fn reject_payout(
     tx.commit().await?;
 
     Ok((StatusCode::OK, Json(json!({ "message": "Payout rejected and balance refunded" }))))
+}
+
+// ── Platform dashboard ────────────────────────────────────────────────────────
+
+pub async fn platform_dashboard(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let (users, bookings, revenue, payouts) = tokio::try_join!(
+        // User counts by role
+        sqlx::query!(
+            r#"SELECT
+                COUNT(*) FILTER (WHERE c.id IS NOT NULL) AS clients,
+                COUNT(*) FILTER (WHERE p.id IS NOT NULL) AS providers,
+                COUNT(*) FILTER (WHERE b.id IS NOT NULL) AS businesses,
+                COUNT(*)                                 AS total
+               FROM users u
+               LEFT JOIN clients   c ON c.user_id = u.id
+               LEFT JOIN providers p ON p.user_id = u.id
+               LEFT JOIN businesses b ON b.user_id = u.id"#
+        )
+        .fetch_one(&pool),
+
+        // Booking counts by status
+        sqlx::query!(
+            r#"SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'pending')   AS pending,
+                COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+                COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
+               FROM bookings"#
+        )
+        .fetch_one(&pool),
+
+        // Revenue totals
+        sqlx::query!(
+            r#"SELECT
+                COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)::float8 AS total_revenue,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'pending'),   0)::float8 AS pending_revenue
+               FROM payments"#
+        )
+        .fetch_one(&pool),
+
+        // Payout totals
+        sqlx::query!(
+            r#"SELECT
+                COALESCE(SUM(amount) FILTER (WHERE status = 'pending'),  0)::float8 AS pending_payouts,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'approved'), 0)::float8 AS approved_payouts
+               FROM payout_requests"#
+        )
+        .fetch_one(&pool),
+    )?;
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "users": {
+                "total":     users.total,
+                "clients":   users.clients,
+                "providers": users.providers,
+                "businesses":users.businesses,
+            },
+            "bookings": {
+                "total":     bookings.total,
+                "pending":   bookings.pending,
+                "confirmed": bookings.confirmed,
+                "completed": bookings.completed,
+                "cancelled": bookings.cancelled,
+            },
+            "revenue": {
+                "total_collected": revenue.total_revenue,
+                "pending_payments":revenue.pending_revenue,
+            },
+            "payouts": {
+                "pending_amount":  payouts.pending_payouts,
+                "approved_amount": payouts.approved_payouts,
+            },
+        })),
+    ))
 }
