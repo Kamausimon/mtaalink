@@ -17,4 +17,5 @@ pub mod reviews;
 pub mod search;
 pub mod service_providers;
 pub mod wallet;
+pub mod ws;
 pub mod services;

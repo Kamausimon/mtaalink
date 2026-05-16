@@ -1,8 +1,9 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::notifications::notify_best_effort;
+use crate::utils::ws_state::{WsConnections, push_to_user};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Query, State},
     http::StatusCode,
     routing::{get, post},
@@ -45,6 +46,7 @@ pub struct Message {
 
 pub async fn send_message(
     State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<NewMessage>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
@@ -90,6 +92,16 @@ pub async fn send_message(
         "You have a new message",
         Some("message"), Some(message.id),
     ).await;
+
+    // Push to receiver's WebSocket connection if they are online
+    push_to_user(&ws_conns, payload.receiver_id, "new_message", json!({
+        "id": message.id,
+        "sender_id": message.sender_id,
+        "content": message.content,
+        "target_type": message.target_type,
+        "target_id": message.target_id,
+        "created_at": message.created_at.to_string(),
+    })).await;
 
     Ok((StatusCode::CREATED, Json(json!({ "message": message }))))
 }

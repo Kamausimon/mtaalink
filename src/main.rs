@@ -42,6 +42,8 @@ use routes::payments::payment_routes;
 use routes::search::search_routes;
 use routes::services::services_routes;
 use routes::wallet::wallet_routes;
+use routes::ws::ws_routes;
+use utils::ws_state::{WsConnections, new_ws_connections};
 
 #[tokio::main]
 async fn main() {
@@ -88,6 +90,7 @@ async fn main() {
     println!("Database migrations applied successfully");
 
     let storage = Arc::new(utils::storage::AppStorage::init());
+    let ws_connections: WsConnections = new_ws_connections();
 
     utils::reminders::start_reminder_task(pool.clone());
 
@@ -128,8 +131,10 @@ async fn main() {
         .nest("/analytics", analytics_routes(pool.clone()))
         .nest("/availability", availability_routes(pool.clone()))
         .nest("/wallet", wallet_routes(pool.clone()))
+        .nest("/ws", ws_routes())
         .nest_service("/uploads", ServeDir::new("uploads")) // Serve static files from the uploads directory
         .layer(GovernorLayer { config: global_conf })
+        .layer(Extension(ws_connections))
         .layer(Extension(storage))
         .layer(cors_layer)
         .layer(TraceLayer::new_for_http())
