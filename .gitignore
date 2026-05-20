@@ -3,3 +3,5 @@
 /src/target
 
 .env
+.cargo
+config.toml
