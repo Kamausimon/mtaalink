@@ -253,6 +253,7 @@ pub async fn login_handler(
 
 #[derive(Debug, sqlx::FromRow)]
 struct UserWithRole {
+    #[allow(dead_code)]
     id: i32,
     email: String,
     username: String,

@@ -84,8 +84,8 @@ impl S3Storage {
         method: &str,
         key: &str,
         body_hash: &str,
-        datetime: &str,          // "20240101T120000Z"
-        date: &str,              // "20240101"
+        datetime: &str, // "20240101T120000Z"
+        date: &str,     // "20240101"
         content_type: &str,
     ) -> String {
         let host = format!("{}.s3.{}.amazonaws.com", self.bucket, self.region);
@@ -151,7 +151,10 @@ impl S3Storage {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Internal(format!("S3 upload error {}: {}", status, body)));
+            return Err(AppError::Internal(format!(
+                "S3 upload error {}: {}",
+                status, body
+            )));
         }
 
         Ok(format!("{}/{}", self.base_url, key))
@@ -231,14 +234,6 @@ impl AppStorage {
         }
     }
 
-    pub async fn save_with_type(&self, key: &str, data: &Bytes, content_type: &str) -> AppResult<String> {
-        match self {
-            AppStorage::Local(s) => s.save(key, data).await,
-            AppStorage::S3(s) => s.save(key, data, content_type).await,
-        }
-    }
-
-    /// Delete the object at `key`.
     pub async fn delete(&self, key: &str) -> AppResult<()> {
         match self {
             AppStorage::Local(s) => s.delete(key).await,
