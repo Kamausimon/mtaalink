@@ -5,7 +5,7 @@ use axum::{
     Extension, Json, Router,
     extract::{Query, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
 };
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use uuid::Uuid;
 pub fn attachments_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/uploadAttachments", post(upload_attachments))
+        .route("/getAttachments", get(get_attachments))
         .with_state(pool)
 }
 

@@ -126,12 +126,6 @@ pub fn booking_reminder_sms(booking_id: i32, scheduled_time: &str, service: &str
     )
 }
 
-pub fn password_reset_sms(otp: &str) -> String {
-    format!(
-        "MtaaLink: Your password reset code is {otp}. \
-         It expires in 15 minutes. Do not share this code."
-    )
-}
 
 pub fn new_booking_received_sms(booking_id: i32, client_name: &str, service: &str) -> String {
     format!(

@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
+use crate::utils::email::{EmailConfig, booking_confirmation_html, send_email};
 use crate::utils::notifications::{notify_and_push, notify_target_owner_and_push};
 use crate::utils::sms::{SmsConfig, booking_confirmation_sms, booking_cancelled_sms,
                         new_booking_received_sms, send_sms_best_effort};
@@ -431,6 +432,36 @@ pub async fn update_booking(
                 if let Some(m) = msg {
                     send_sms_best_effort(&sms_cfg, &phone, &m).await;
                 }
+            }
+        }
+    }
+
+    // Email confirmation when booking is confirmed
+    if new_status == "confirmed" {
+        if let Ok(email_cfg) = EmailConfig::from_env() {
+            let details = sqlx::query!(
+                r#"SELECT u.email, u.username, b.service_description, b.scheduled_time,
+                          COALESCE(p.service_name, biz.business_name, 'Provider') AS provider_name
+                   FROM bookings b
+                   JOIN users u ON u.id = b.client_id
+                   LEFT JOIN providers p ON b.target_type = 'provider' AND b.target_id = p.id
+                   LEFT JOIN businesses biz ON b.target_type = 'business' AND b.target_id = biz.id
+                   WHERE b.id = $1"#,
+                id
+            )
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
+
+            if let Some(d) = details {
+                let html = booking_confirmation_html(
+                    &d.username,
+                    &d.service_description.unwrap_or_default(),
+                    &d.scheduled_time.format("%d %b %Y %H:%M").to_string(),
+                    &d.provider_name.unwrap_or_default(),
+                );
+                let _ = send_email(&email_cfg, &d.email, "Your booking is confirmed — MtaaLink", &html).await;
             }
         }
     }

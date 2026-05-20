@@ -102,6 +102,7 @@ struct StkPushRequest {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
+#[allow(dead_code)]
 pub struct StkPushResponse {
     pub merchant_request_id: Option<String>,
     pub checkout_request_id: Option<String>,
@@ -183,6 +184,7 @@ pub struct CallbackBody {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
+#[allow(dead_code)]
 pub struct StkCallback {
     pub merchant_request_id: String,
     pub checkout_request_id: String,
@@ -218,6 +220,7 @@ impl CallbackMetadata {
             .map(|s| s.to_string())
     }
 
+    #[allow(dead_code)]
     pub fn amount(&self) -> Option<f64> {
         self.get("Amount").and_then(|v| v.as_f64())
     }
