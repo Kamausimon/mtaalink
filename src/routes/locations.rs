@@ -252,45 +252,74 @@ pub async fn create_provider_location(
     Ok((StatusCode::CREATED, Json(json!({ "data": location }))))
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, sqlx::FromRow)]
-pub struct SearchLocation {
+#[derive(Deserialize, Debug)]
+pub struct LocationSearchQuery {
     county_id: Option<i32>,
     constituency_id: Option<i32>,
     ward_id: Option<i32>,
     target_type: String,
 }
 
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct LocationSearchResult {
+    pub id: i32,
+    pub name: Option<String>,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub ward_name: Option<String>,
+    pub constituency_name: Option<String>,
+    pub county_name: Option<String>,
+}
+
 pub async fn search_business_or_provider_by_location(
-    Query(params): Query<SearchLocation>,
+    Query(params): Query<LocationSearchQuery>,
     State(pool): State<PgPool>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let table = match params.target_type.as_str() {
-        "business" => "businesses",
-        "provider" => "providers",
-        _ => return Err(AppError::BadRequest("Invalid target type. Must be 'business' or 'provider'".to_string())),
-    };
-
-    let mut query = format!("SELECT * FROM {}", table);
-    let mut conditions = Vec::new();
-
-    if let Some(county_id) = params.county_id {
-        conditions.push(format!("county_id = {}", county_id));
-    }
-    if let Some(constituency_id) = params.constituency_id {
-        conditions.push(format!("constituency_id = {}", constituency_id));
-    }
-    if let Some(ward_id) = params.ward_id {
-        conditions.push(format!("ward_id = {}", ward_id));
-    }
-
-    if !conditions.is_empty() {
-        query.push_str(" WHERE ");
-        query.push_str(&conditions.join(" AND "));
-    }
-
-    let results = sqlx::query_as::<_, SearchLocation>(&query)
+    let results = match params.target_type.to_lowercase().as_str() {
+        "business" => sqlx::query_as::<_, LocationSearchResult>(
+            r#"SELECT DISTINCT ON (b.id) b.id, b.business_name AS name,
+                      bb.address, bb.phone,
+                      w.name AS ward_name, c.name AS constituency_name, co.name AS county_name
+               FROM businesses b
+               JOIN business_branches bb ON bb.business_id = b.id
+               JOIN wards w ON bb.ward_id = w.id
+               JOIN constituencies c ON w.constituency_id = c.id
+               JOIN counties co ON c.county_id = co.id
+               WHERE ($1::int IS NULL OR co.id = $1)
+                 AND ($2::int IS NULL OR c.id = $2)
+                 AND ($3::int IS NULL OR w.id = $3)
+               ORDER BY b.id"#,
+        )
+        .bind(params.county_id)
+        .bind(params.constituency_id)
+        .bind(params.ward_id)
         .fetch_all(&pool)
-        .await?;
+        .await?,
+
+        "provider" => sqlx::query_as::<_, LocationSearchResult>(
+            r#"SELECT DISTINCT ON (p.id) p.id, p.service_name AS name,
+                      pl.address, pl.phone,
+                      w.name AS ward_name, c.name AS constituency_name, co.name AS county_name
+               FROM providers p
+               JOIN provider_locations pl ON pl.provider_id = p.id
+               JOIN wards w ON pl.ward_id = w.id
+               JOIN constituencies c ON w.constituency_id = c.id
+               JOIN counties co ON c.county_id = co.id
+               WHERE ($1::int IS NULL OR co.id = $1)
+                 AND ($2::int IS NULL OR c.id = $2)
+                 AND ($3::int IS NULL OR w.id = $3)
+               ORDER BY p.id"#,
+        )
+        .bind(params.county_id)
+        .bind(params.constituency_id)
+        .bind(params.ward_id)
+        .fetch_all(&pool)
+        .await?,
+
+        _ => return Err(AppError::BadRequest(
+            "Invalid target type. Must be 'business' or 'provider'".to_string(),
+        )),
+    };
 
     Ok((StatusCode::OK, Json(json!({ "data": results }))))
 }

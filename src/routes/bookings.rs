@@ -223,19 +223,18 @@ pub async fn get_bookings_client(
     CurrentUser { user_id }: CurrentUser,
     Query(params): Query<BookingQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let mut sql = String::from("SELECT * FROM bookings WHERE client_id = $1");
-    if let Some(ref status) = params.status {
-        sql.push_str(&format!(" AND status = '{}'", status));
-    }
-    if let Some(ref target_type) = params.target_type {
-        sql.push_str(&format!(" AND target_type = '{}'", target_type));
-    }
-    sql.push_str(" ORDER BY scheduled_time DESC");
-
-    let bookings = sqlx::query_as::<_, Booking>(&sql)
-        .bind(user_id)
-        .fetch_all(&pool)
-        .await?;
+    let bookings = sqlx::query_as::<_, Booking>(
+        r#"SELECT * FROM bookings
+           WHERE client_id = $1
+             AND ($2::text IS NULL OR status = $2)
+             AND ($3::text IS NULL OR target_type = $3)
+           ORDER BY scheduled_time DESC"#,
+    )
+    .bind(user_id)
+    .bind(&params.status)
+    .bind(&params.target_type)
+    .fetch_all(&pool)
+    .await?;
 
     Ok((StatusCode::OK, Json(json!({ "bookings": bookings }))))
 }

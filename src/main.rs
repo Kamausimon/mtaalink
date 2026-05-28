@@ -29,7 +29,7 @@ use routes::bookings::booking_routes;
 use routes::businesses::businesses_routes;
 use routes::categories::category_routes;
 use routes::clients::client_routes;
-use routes::dashboard::dashboard;
+use routes::dashboard::dashboard_routes;
 use routes::favorites::favorites_routes;
 use routes::locations::locations_routes;
 use routes::messages::messages_routes;
@@ -112,7 +112,7 @@ async fn main() {
 
     let app = Router::new()
         .nest("/auth", auth_routes(pool.clone())) // Mount the auth routes
-        .route("/dashboard", get(dashboard)) // Add the dashboard route
+        .nest("/dashboard", dashboard_routes(pool.clone()))
         .nest("/service_providers", service_providers_routes(pool.clone())) // Mount the service providers routes
         .nest("/businesses", businesses_routes(pool.clone())) // Mount the businesses routes
         .nest("/clients", client_routes(pool.clone())) // Mount the clients routes

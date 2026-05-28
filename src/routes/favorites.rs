@@ -2,7 +2,7 @@ use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -69,19 +69,28 @@ pub async fn get_favorites(
     Ok((StatusCode::OK, Json(json!({ "favorites": result }))))
 }
 
+#[derive(Deserialize)]
+pub struct RemoveFavoriteQuery {
+    target_type: String,
+}
+
 pub async fn remove_favorite(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
+    Query(params): Query<RemoveFavoriteQuery>,
     CurrentUser { user_id }: CurrentUser,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     if id <= 0 {
         return Err(AppError::BadRequest("Invalid target ID".to_string()));
     }
+    let target_type = params.target_type.to_lowercase();
+    if !["provider", "business"].contains(&target_type.as_str()) {
+        return Err(AppError::BadRequest("Invalid target type. Must be 'provider' or 'business'".to_string()));
+    }
 
     sqlx::query!(
-        "DELETE FROM favorites WHERE user_id = $1 AND target_id = $2",
-        user_id,
-        id
+        "DELETE FROM favorites WHERE user_id = $1 AND target_id = $2 AND target_type = $3",
+        user_id, id, target_type
     )
     .execute(&pool)
     .await?;

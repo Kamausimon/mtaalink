@@ -138,23 +138,16 @@ pub async fn get_all_posts(
     State(pool): State<PgPool>,
     Query(params): Query<PostQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let mut query = String::from("SELECT * FROM posts");
-    let mut conditions = vec![];
-
-    if let Some(business_id) = params.business_id {
-        conditions.push(format!("business_id = {}", business_id));
-    }
-    if let Some(provider_id) = params.provider_id {
-        conditions.push(format!("provider_id = {}", provider_id));
-    }
-    if !conditions.is_empty() {
-        query.push_str(" WHERE ");
-        query.push_str(&conditions.join(" AND "));
-    }
-
-    let posts = sqlx::query_as::<_, Post>(&query)
-        .fetch_all(&pool)
-        .await?;
+    let posts = sqlx::query_as::<_, Post>(
+        r#"SELECT * FROM posts
+           WHERE ($1::int IS NULL OR business_id = $1)
+             AND ($2::int IS NULL OR provider_id = $2)
+           ORDER BY created_at DESC"#,
+    )
+    .bind(params.business_id)
+    .bind(params.provider_id)
+    .fetch_all(&pool)
+    .await?;
 
     Ok((StatusCode::OK, Json(json!({ "posts": posts }))))
 }
@@ -199,14 +192,27 @@ pub async fn get_posts_by_business_id(
 pub async fn delete_post(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
-    CurrentUser { user_id: _ }: CurrentUser,
+    CurrentUser { user_id }: CurrentUser,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let exists = sqlx::query_scalar!("SELECT id FROM posts WHERE id = $1", id)
-        .fetch_optional(&pool)
-        .await?;
+    let post = sqlx::query!(
+        "SELECT provider_id, business_id FROM posts WHERE id = $1", id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
 
-    if exists.is_none() {
-        return Err(AppError::NotFound("Post not found".to_string()));
+    let owned = match (post.provider_id, post.business_id) {
+        (Some(pid), _) => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2", pid, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        (_, Some(bid)) => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2", bid, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !owned {
+        return Err(AppError::Forbidden("You do not have permission to delete this post".to_string()));
     }
 
     sqlx::query!("DELETE FROM posts WHERE id = $1", id)
@@ -226,11 +232,32 @@ pub struct UpdatePost {
 pub async fn update_post_and_attachments(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
-    CurrentUser { user_id: _ }: CurrentUser,
+    CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<UpdatePost>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     if payload.attachments.len() > 5 {
         return Err(AppError::BadRequest("Too many attachments. Maximum is 5.".to_string()));
+    }
+
+    let post = sqlx::query!(
+        "SELECT provider_id, business_id FROM posts WHERE id = $1", id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
+
+    let owned = match (post.provider_id, post.business_id) {
+        (Some(pid), _) => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2", pid, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        (_, Some(bid)) => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2", bid, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !owned {
+        return Err(AppError::Forbidden("You do not have permission to update this post".to_string()));
     }
 
     let mut tx = pool.begin().await?;
