@@ -263,11 +263,32 @@ pub async fn reply_review(
         return Err(AppError::BadRequest("Reply comment cannot be empty".to_string()));
     }
 
-    // Verify the review exists
-    sqlx::query_scalar!("SELECT id FROM reviews WHERE id = $1", review_id)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Review not found".to_string()))?;
+    // Verify the review exists and get its target
+    let review = sqlx::query!(
+        "SELECT target_type, target_id FROM reviews WHERE id = $1", review_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Review not found".to_string()))?;
+
+    // Only the target owner (provider or business) may reply
+    let is_owner = match review.target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
+            review.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            review.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !is_owner {
+        return Err(AppError::Forbidden(
+            "Only the provider or business owner can reply to reviews on their profile".to_string(),
+        ));
+    }
 
     // Prevent duplicate replies from the same user
     let existing = sqlx::query_scalar!(
