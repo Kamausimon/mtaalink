@@ -56,10 +56,19 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     println!("Using database URL: {}", database_url);
 
-    let frontend_origin =
-        env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    // FRONTEND_URL accepts comma-separated origins, e.g.:
+    // FRONTEND_URL=https://mtaalink.vercel.app,http://localhost:3000
+    let allowed_origins: Vec<axum::http::HeaderValue> =
+        env::var("FRONTEND_URL")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string())
+            .split(',')
+            .map(|s| {
+                s.trim()
+                    .parse::<axum::http::HeaderValue>()
+                    .expect("Invalid value in FRONTEND_URL")
+            })
+            .collect();
 
-    // Enable CORS for all origins
     let cors_layer = CorsLayer::new()
         .allow_methods([
             axum::http::Method::GET,
@@ -73,7 +82,7 @@ async fn main() {
             header::CONTENT_LENGTH,
             header::ACCEPT,
         ])
-        .allow_origin(frontend_origin.parse::<axum::http::HeaderValue>().unwrap())
+        .allow_origin(allowed_origins)
         .allow_credentials(true);
 
     // Create a connection pool
