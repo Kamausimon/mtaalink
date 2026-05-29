@@ -1,0 +1,6 @@
+ALTER TABLE bookings
+  ADD COLUMN IF NOT EXISTS client_address   TEXT,
+  ADD COLUMN IF NOT EXISTS client_latitude  DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS client_longitude DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS client_phone     TEXT,
+  ADD COLUMN IF NOT EXISTS cancel_reason    TEXT;

@@ -36,15 +36,19 @@ pub struct Booking {
     pub target_id: i32,
     pub branch_id: Option<i32>,
     pub service_id: Option<i32>,
-    pub service_description: String,
+    pub service_description: Option<String>,
     pub scheduled_time: chrono::NaiveDateTime,
     pub status: String,
     pub duration: Option<i32>,
     pub created_at: Option<NaiveDateTime>,
     pub updated_at: Option<NaiveDateTime>,
+    pub client_address: Option<String>,
+    pub client_latitude: Option<f64>,
+    pub client_longitude: Option<f64>,
+    pub client_phone: Option<String>,
+    pub cancel_reason: Option<String>,
 }
 
-/// Input for creating a booking — includes optional phone for SMS notification.
 #[derive(Deserialize, Debug)]
 pub struct CreateBookingInput {
     pub target_type: String,
@@ -53,9 +57,12 @@ pub struct CreateBookingInput {
     pub service_id: Option<i32>,
     pub service_description: String,
     pub scheduled_time: chrono::NaiveDateTime,
-    /// Client's phone in any format (07XX / +2547XX / 2547XX).
-    /// If provided, an SMS confirmation is sent after booking.
+    /// Client phone (07XX / +2547XX / 2547XX) — used for SMS and stored so provider can call back.
     pub client_phone: Option<String>,
+    /// Physical address where the service should be performed.
+    pub client_address: Option<String>,
+    pub client_latitude: Option<f64>,
+    pub client_longitude: Option<f64>,
 }
 
 pub async fn create_booking(
@@ -132,8 +139,9 @@ pub async fn create_booking(
 
     let record = sqlx::query!(
         r#"INSERT INTO bookings (client_id, target_type, target_id, branch_id, service_id,
-           service_description, scheduled_time, duration, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id"#,
+           service_description, scheduled_time, duration, status,
+           client_address, client_latitude, client_longitude, client_phone)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id"#,
         user_id,
         target_type,
         target_id,
@@ -142,7 +150,11 @@ pub async fn create_booking(
         payload.service_description.trim(),
         payload.scheduled_time,
         service_duration,
-        "pending"
+        "pending",
+        payload.client_address.as_deref(),
+        payload.client_latitude,
+        payload.client_longitude,
+        payload.client_phone.as_deref(),
     )
     .fetch_one(&pool)
     .await?;
@@ -262,6 +274,9 @@ pub struct BookingResponse {
     pub client_name: String,
     pub client_email: String,
     pub client_phone: Option<String>,
+    pub client_address: Option<String>,
+    pub client_latitude: Option<f64>,
+    pub client_longitude: Option<f64>,
     pub service_name: String,
 }
 
@@ -281,8 +296,8 @@ pub async fn get_bookings_received(
     let rows = sqlx::query!(
         r#"SELECT b.id, b.client_id, b.target_type, b.target_id, b.branch_id, b.service_id,
                b.service_description, b.scheduled_time, b.status, b.duration, b.created_at,
+               b.client_address, b.client_latitude, b.client_longitude, b.client_phone,
                u.username as client_name, u.email as client_email,
-               '' as client_phone,
                CASE WHEN b.service_id IS NOT NULL THEN s.title ELSE b.service_description END AS service_name
         FROM bookings b
         LEFT JOIN users u ON b.client_id = u.id
@@ -313,6 +328,9 @@ pub async fn get_bookings_received(
             client_name: row.client_name,
             client_email: row.client_email,
             client_phone: row.client_phone,
+            client_address: row.client_address,
+            client_latitude: row.client_latitude,
+            client_longitude: row.client_longitude,
             service_name: row.service_name.unwrap_or_default(),
         })
         .collect();
@@ -329,11 +347,18 @@ pub async fn get_booking_by_id(
         return Err(AppError::BadRequest("Invalid booking ID".to_string()));
     }
 
+    // Accessible to the client who made it OR the provider/business who received it
     let booking = sqlx::query_as::<_, Booking>(
-        "SELECT * FROM bookings WHERE client_id = $1 AND id = $2",
+        r#"SELECT * FROM bookings
+           WHERE id = $1
+             AND (
+               client_id = $2
+               OR (target_type = 'provider'  AND EXISTS (SELECT 1 FROM providers  WHERE id = target_id AND user_id = $2))
+               OR (target_type = 'business'  AND EXISTS (SELECT 1 FROM businesses WHERE id = target_id AND user_id = $2))
+             )"#,
     )
-    .bind(user_id)
     .bind(id)
+    .bind(user_id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
@@ -344,54 +369,54 @@ pub async fn get_booking_by_id(
 #[derive(Deserialize, Serialize, Debug)]
 pub struct BookingUpdate {
     status: String,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct UpdateQuery {
-    target_id: i32,
-    target_type: String,
+    cancel_reason: Option<String>,
 }
 
 pub async fn update_booking(
     State(pool): State<PgPool>,
     Extension(ws_conns): Extension<WsConnections>,
     Path(id): Path<i32>,
-    Query(params): Query<UpdateQuery>,
     CurrentUser { user_id }: CurrentUser,
     Json(payload): Json<BookingUpdate>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let target_type = params.target_type.to_lowercase();
-    if !["provider", "business"].contains(&target_type.as_str()) {
-        return Err(AppError::BadRequest("Invalid target type".to_string()));
-    }
-    if params.target_id <= 0 || id <= 0 {
-        return Err(AppError::BadRequest("Invalid target ID or booking ID".to_string()));
+    if id <= 0 {
+        return Err(AppError::BadRequest("Invalid booking ID".to_string()));
     }
 
+    // Look up the booking to get target info
+    let booking = sqlx::query!(
+        "SELECT target_type, target_id FROM bookings WHERE id = $1", id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
+
+    let target_type = booking.target_type.to_lowercase();
+
+    // Verify the current user owns the target
     let is_owner = match target_type.as_str() {
-        "business" => sqlx::query_scalar!(
-            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
-            params.target_id, user_id
-        ).fetch_optional(&pool).await?,
         "provider" => sqlx::query_scalar!(
             "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
-            params.target_id, user_id
-        ).fetch_optional(&pool).await?,
-        _ => None,
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
     };
 
-    if is_owner.is_none() {
+    if !is_owner {
         return Err(AppError::Forbidden("You don't have permission to update this booking".to_string()));
     }
 
     let new_status = payload.status.to_lowercase();
 
     sqlx::query!(
-        "UPDATE bookings SET status = $1 WHERE id = $2 AND target_type = $3 AND target_id = $4",
+        "UPDATE bookings SET status = $1, cancel_reason = $2 WHERE id = $3",
         new_status,
+        payload.cancel_reason.as_deref(),
         id,
-        target_type,
-        params.target_id
     )
     .execute(&pool)
     .await?;

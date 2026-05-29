@@ -4,7 +4,7 @@ use crate::utils::image_upload::parse_image_from_multipart;
 use crate::utils::storage::{SharedStorage, generate_key};
 use axum::{
     Extension, Json, Router,
-    extract::{Multipart, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -18,6 +18,7 @@ pub fn service_providers_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/onboard", post(onboard_service_provider))
         .route("/listProviders", get(list_providers))
+        .route("/:id", get(get_provider_public_profile))
         .route("/updateProfile", post(update_provider_profile))
         .route("/uploadProfilePhoto", post(upload_provider_profile_photo))
         .route("/uploadCoverPhoto", post(upload_provider_cover_photo))
@@ -105,44 +106,107 @@ pub struct ProviderQuery {
 #[derive(Serialize, Debug, sqlx::FromRow)]
 struct PublicProvider {
     id: i32,
-    service_name: String,
+    service_name: Option<String>,
     category: Option<String>,
     location: Option<String>,
     email: Option<String>,
     phone_number: Option<String>,
     website: Option<String>,
+    profile_photo: Option<String>,
+    avg_rating: Option<f64>,
+    review_count: Option<i64>,
 }
 
 pub async fn list_providers(
     State(pool): State<PgPool>,
     Query(params): Query<ProviderQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let mut query = String::from(
-        "SELECT p.id, p.service_name, p.category, p.location, p.email, p.phone_number, p.website \
-         FROM providers p JOIN users u ON p.user_id = u.id WHERE 1=1",
-    );
-
-    let mut bindings: Vec<String> = Vec::new();
-    let mut param_index = 1;
-
-    if let Some(ref category) = params.category {
-        query.push_str(&format!(" AND p.category = ${}", param_index));
-        param_index += 1;
-        bindings.push(category.clone());
-    }
-    if let Some(ref location) = params.location {
-        query.push_str(&format!(" AND p.location = ${}", param_index));
-        bindings.push(location.clone());
-    }
-
-    let mut q = sqlx::query_as::<_, PublicProvider>(&query);
-    for bind in bindings {
-        q = q.bind(bind);
-    }
-
-    let providers = q.fetch_all(&pool).await.map_err(AppError::Database)?;
+    let providers = sqlx::query_as::<_, PublicProvider>(
+        r#"SELECT p.id, p.service_name, p.category, p.location, p.email, p.phone_number,
+                  p.website, p.profile_photo,
+                  ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
+                  COUNT(r.id) AS review_count
+           FROM providers p
+           JOIN users u ON p.user_id = u.id
+           LEFT JOIN reviews r ON r.target_id = p.id AND r.target_type = 'provider'
+           WHERE ($1::text IS NULL OR p.category = $1)
+             AND ($2::text IS NULL OR p.location = $2)
+           GROUP BY p.id
+           ORDER BY avg_rating DESC NULLS LAST, p.id"#,
+    )
+    .bind(&params.category)
+    .bind(&params.location)
+    .fetch_all(&pool)
+    .await
+    .map_err(AppError::Database)?;
 
     Ok((StatusCode::OK, Json(json!({ "providers": providers }))))
+}
+
+#[derive(Serialize, Debug, sqlx::FromRow)]
+struct ProviderPublicProfile {
+    id: i32,
+    service_name: Option<String>,
+    service_description: Option<String>,
+    category: Option<String>,
+    location: Option<String>,
+    email: Option<String>,
+    phone_number: Option<String>,
+    website: Option<String>,
+    whatsapp: Option<String>,
+    profile_photo: Option<String>,
+    cover_photo: Option<String>,
+    avg_rating: Option<f64>,
+    review_count: Option<i64>,
+}
+
+pub async fn get_provider_public_profile(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let profile = sqlx::query_as::<_, ProviderPublicProfile>(
+        r#"SELECT p.id, p.service_name, p.service_description, p.category, p.location,
+                  p.email, p.phone_number, p.website, p.whatsapp,
+                  p.profile_photo, p.cover_photo,
+                  ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
+                  COUNT(r.id) AS review_count
+           FROM providers p
+           LEFT JOIN reviews r ON r.target_id = p.id AND r.target_type = 'provider'
+           WHERE p.id = $1
+           GROUP BY p.id"#,
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Provider not found".to_string()))?;
+
+    // Fetch their active services
+    let services = sqlx::query!(
+        r#"SELECT id, title, description, price, duration, category_id
+           FROM services
+           WHERE target_type = 'provider' AND target_id = $1 AND is_active = true
+           ORDER BY id"#,
+        id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let services_json: Vec<serde_json::Value> = services
+        .into_iter()
+        .map(|s| json!({
+            "id": s.id,
+            "title": s.title,
+            "description": s.description,
+            "price": s.price,
+            "duration": s.duration,
+            "category_id": s.category_id,
+        }))
+        .collect();
+
+    Ok((StatusCode::OK, Json(json!({
+        "provider": profile,
+        "services": services_json,
+    }))))
 }
 
 #[derive(Deserialize, Debug, Validate)]

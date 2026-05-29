@@ -4,7 +4,7 @@ use crate::utils::image_upload::parse_image_from_multipart;
 use crate::utils::storage::{SharedStorage, generate_key};
 use axum::{
     Extension, Json, Router,
-    extract::{Multipart, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -17,6 +17,7 @@ pub fn businesses_routes(pool: PgPool) -> Router {
     Router::new()
         .route("/onboard", post(onboard_business))
         .route("/listBusinesses", get(list_businesses))
+        .route("/:id", get(get_business_public_profile))
         .route("/updateProfile", post(update_business_profile))
         .route("/uploadLogo", post(upload_business_logo))
         .route("/uploadProfilePicture", post(upload_business_profile_picture))
@@ -344,4 +345,103 @@ pub async fn upload_business_cover_photo(
     }
 
     Ok((StatusCode::OK, Json(json!({ "message": "Cover photo uploaded successfully", "cover_photo": url }))))
+}
+
+// ── Public profile ────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Debug, sqlx::FromRow)]
+struct BusinessPublicProfile {
+    id: i32,
+    business_name: Option<String>,
+    description: Option<String>,
+    category: Option<String>,
+    location: Option<String>,
+    phone_number: Option<String>,
+    email: Option<String>,
+    website: Option<String>,
+    whatsapp: Option<String>,
+    logo: Option<String>,
+    profile_photo: Option<String>,
+    cover_photo: Option<String>,
+    avg_rating: Option<f64>,
+    review_count: Option<i64>,
+}
+
+pub async fn get_business_public_profile(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let profile = sqlx::query_as::<_, BusinessPublicProfile>(
+        r#"SELECT b.id, b.business_name, b.description, b.category, b.location,
+                  b.phone_number, b.email, b.website, b.whatsapp,
+                  b.logo, b.profile_photo, b.cover_photo,
+                  ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
+                  COUNT(r.id) AS review_count
+           FROM businesses b
+           LEFT JOIN reviews r ON r.target_id = b.id AND r.target_type = 'business'
+           WHERE b.id = $1
+           GROUP BY b.id"#,
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Business not found".to_string()))?;
+
+    // Fetch their active services
+    let services = sqlx::query!(
+        r#"SELECT id, title, description, price, duration, category_id
+           FROM services
+           WHERE target_type = 'business' AND target_id = $1 AND is_active = true
+           ORDER BY id"#,
+        id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let services_json: Vec<serde_json::Value> = services
+        .into_iter()
+        .map(|s| json!({
+            "id": s.id,
+            "title": s.title,
+            "description": s.description,
+            "price": s.price,
+            "duration": s.duration,
+            "category_id": s.category_id,
+        }))
+        .collect();
+
+    // Fetch branch locations
+    let branches = sqlx::query!(
+        r#"SELECT bb.id, bb.name, bb.address, bb.phone, bb.latitude, bb.longitude,
+                  w.name AS ward_name, c.name AS constituency_name, co.name AS county_name
+           FROM business_branches bb
+           JOIN wards w ON bb.ward_id = w.id
+           JOIN constituencies c ON w.constituency_id = c.id
+           JOIN counties co ON c.county_id = co.id
+           WHERE bb.business_id = $1"#,
+        id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let branches_json: Vec<serde_json::Value> = branches
+        .into_iter()
+        .map(|b| json!({
+            "id": b.id,
+            "name": b.name,
+            "address": b.address,
+            "phone": b.phone,
+            "latitude": b.latitude,
+            "longitude": b.longitude,
+            "ward": b.ward_name,
+            "constituency": b.constituency_name,
+            "county": b.county_name,
+        }))
+        .collect();
+
+    Ok((StatusCode::OK, Json(json!({
+        "business": profile,
+        "services": services_json,
+        "branches": branches_json,
+    }))))
 }

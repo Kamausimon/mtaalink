@@ -143,7 +143,8 @@ Returns upcoming bookings and unread notifications for all users. For providers/
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/service_providers/onboard` | Yes | Complete provider onboarding |
-| `GET` | `/service_providers/listProviders` | Yes | List providers |
+| `GET` | `/service_providers/listProviders` | Yes | List providers with ratings and photos |
+| `GET` | `/service_providers/:id` | No | Full public profile — description, services, rating |
 | `POST` | `/service_providers/updateProfile` | Yes | Update provider profile |
 | `POST` | `/service_providers/uploadProfilePhoto` | Yes | Upload profile photo |
 | `POST` | `/service_providers/uploadCoverPhoto` | Yes | Upload cover photo |
@@ -152,7 +153,9 @@ Returns upcoming bookings and unread notifications for all users. For providers/
 | `POST` | `/service_providers/updateBulkAvailability` | Yes | Update full-week availability |
 | `GET` | `/service_providers/getAvailability` | Yes | Get own availability schedule |
 
-**List providers query params:** `?category=plumbing&location=Nairobi`
+**List providers query params:** `?category=plumbing&location=Nairobi` — results sorted by average rating.
+
+**Public profile** (`GET /service_providers/:id`) returns: profile info, photos, average rating, review count, and active services list. No auth required — used for the browse/decide flow.
 
 ---
 
@@ -162,10 +165,13 @@ Returns upcoming bookings and unread notifications for all users. For providers/
 |---|---|---|---|
 | `POST` | `/businesses/onboard` | Yes | Complete business onboarding |
 | `GET` | `/businesses/listBusinesses` | Yes | List businesses |
+| `GET` | `/businesses/:id` | No | Full public profile — description, services, branches, rating |
 | `POST` | `/businesses/updateProfile` | Yes | Update business profile |
 | `POST` | `/businesses/uploadLogo` | Yes | Upload logo |
 | `POST` | `/businesses/uploadProfilePicture` | Yes | Upload profile picture |
 | `POST` | `/businesses/uploadCoverPhoto` | Yes | Upload cover photo |
+
+**Public profile** (`GET /businesses/:id`) returns: business info, photos, average rating, active services, and all branch locations.
 
 ---
 
@@ -226,15 +232,24 @@ Returns upcoming bookings and unread notifications for all users. For providers/
   "service_id": 2,
   "service_description": "Fix kitchen sink",
   "scheduled_time": "2026-06-15T10:00:00",
-  "client_phone": "0712345678"
+  "client_phone": "0712345678",
+  "client_address": "Apt 4B, Ngong Road, Nairobi",
+  "client_latitude": -1.2921,
+  "client_longitude": 36.8219
 }
 ```
 
+`client_phone`, `client_address`, `client_latitude`, `client_longitude` are all optional but recommended — the provider sees them when they view the booking.
+
 **Get my bookings query params:** `?status=confirmed&target_type=provider`
 
-**Get received bookings query params:** `?target_type=provider&target_id=1&status=pending`
+**Get received bookings query params:** `?target_type=provider&target_id=1&status=pending` — response includes `client_phone`, `client_address`, `client_latitude`, `client_longitude` so the provider can call the client or view their location on a map.
 
-**Update status body:** `{ "status": "confirmed" }` — valid statuses: `pending`, `confirmed`, `completed`, `cancelled`
+**Update status body:**
+```json
+{ "status": "confirmed", "cancel_reason": "Not available that day" }
+```
+Valid statuses: `pending`, `confirmed`, `completed`, `cancelled`. `cancel_reason` is optional and only relevant when cancelling. No query params required — the server infers ownership from your JWT.
 
 On status change to `confirmed` or `cancelled`: client receives email, SMS, and in-app notification.
 
