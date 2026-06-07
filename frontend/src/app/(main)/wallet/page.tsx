@@ -20,6 +20,7 @@ export default function WalletPage() {
   const router = useRouter();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [targetId, setTargetId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [payoutForm, setPayoutForm] = useState({ amount: "", phone_number: "" });
@@ -35,15 +36,15 @@ export default function WalletPage() {
   }, [isAuthenticated, user]);
 
   async function loadWallet() {
-    // We need target_id — fetch from dashboard which includes it
     try {
       const dash = await api.dashboard.get(token!);
-      const targetId = dash.provider_id ?? dash.business_id;
-      if (!targetId) return;
+      const id = dash.provider_id ?? dash.business_id;
+      if (!id) return;
+      setTargetId(id);
 
       const [walletRes, txRes] = await Promise.all([
-        api.wallet.get(targetType, targetId, token!),
-        api.wallet.transactions(targetType, targetId, token!),
+        api.wallet.get(targetType, id, token!),
+        api.wallet.transactions(targetType, id, token!),
       ]);
       setWallet(walletRes.wallet);
       setTransactions(txRes.transactions);
@@ -58,13 +59,10 @@ export default function WalletPage() {
     const amount = Number(payoutForm.amount);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payoutForm.phone_number) { toast.error("Enter your M-Pesa phone number"); return; }
+    if (!targetId) return;
 
     setPayoutLoading(true);
     try {
-      const dash = await api.dashboard.get(token!);
-      const targetId = dash.provider_id ?? dash.business_id;
-      if (!targetId) return;
-
       await api.wallet.requestPayout(targetType, targetId, {
         amount,
         phone_number: payoutForm.phone_number,
