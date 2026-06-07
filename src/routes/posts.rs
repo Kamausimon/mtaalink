@@ -123,8 +123,8 @@ pub struct PostQuery {
     pub provider_id: Option<i32>,
 }
 
-#[derive(Deserialize, Serialize, sqlx::FromRow)]
-pub struct Post {
+#[derive(Debug, sqlx::FromRow)]
+struct PostRow {
     pub id: i32,
     pub title: String,
     pub content: String,
@@ -132,61 +132,105 @@ pub struct Post {
     pub provider_id: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    image_urls_csv: String,
+    pub like_count: i64,
 }
+
+impl PostRow {
+    fn to_value(&self) -> serde_json::Value {
+        let image_urls: Vec<&str> = if self.image_urls_csv.is_empty() {
+            vec![]
+        } else {
+            self.image_urls_csv.split(',').collect()
+        };
+        json!({
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "business_id": self.business_id,
+            "provider_id": self.provider_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "image_urls": image_urls,
+            "like_count": self.like_count,
+        })
+    }
+}
+
+const POSTS_WITH_DETAILS_SQL: &str = r#"
+    SELECT
+        p.id, p.title, p.content, p.business_id, p.provider_id,
+        p.created_at, p.updated_at,
+        COALESCE(string_agg(DISTINCT a.file_path, ','), '') AS image_urls_csv,
+        COUNT(DISTINCT pl.user_id) AS like_count
+    FROM posts p
+    LEFT JOIN attachments a ON a.post_id = p.id
+    LEFT JOIN post_likes pl ON pl.post_id = p.id
+"#;
 
 pub async fn get_all_posts(
     State(pool): State<PgPool>,
     Query(params): Query<PostQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let posts = sqlx::query_as::<_, Post>(
-        r#"SELECT * FROM posts
-           WHERE ($1::int IS NULL OR business_id = $1)
-             AND ($2::int IS NULL OR provider_id = $2)
-           ORDER BY created_at DESC"#,
+    let posts = sqlx::query_as::<_, PostRow>(
+        &format!(
+            "{} WHERE ($1::int IS NULL OR p.business_id = $1) AND ($2::int IS NULL OR p.provider_id = $2)
+             GROUP BY p.id ORDER BY p.created_at DESC",
+            POSTS_WITH_DETAILS_SQL
+        ),
     )
     .bind(params.business_id)
     .bind(params.provider_id)
     .fetch_all(&pool)
     .await?;
 
-    Ok((StatusCode::OK, Json(json!({ "posts": posts }))))
+    let values: Vec<serde_json::Value> = posts.iter().map(|p| p.to_value()).collect();
+    Ok((StatusCode::OK, Json(json!({ "posts": values }))))
 }
 
 pub async fn get_post_by_id(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let post = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
+    let post = sqlx::query_as::<_, PostRow>(
+        &format!("{} WHERE p.id = $1 GROUP BY p.id", POSTS_WITH_DETAILS_SQL),
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Post not found".to_string()))?;
 
-    Ok((StatusCode::OK, Json(json!({ "post": post }))))
+    Ok((StatusCode::OK, Json(json!({ "post": post.to_value() }))))
 }
 
 pub async fn get_posts_by_provider_id(
     State(pool): State<PgPool>,
     Path(provider_id): Path<i32>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let posts = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE provider_id = $1")
-        .bind(provider_id)
-        .fetch_all(&pool)
-        .await?;
+    let posts = sqlx::query_as::<_, PostRow>(
+        &format!("{} WHERE p.provider_id = $1 GROUP BY p.id ORDER BY p.created_at DESC", POSTS_WITH_DETAILS_SQL),
+    )
+    .bind(provider_id)
+    .fetch_all(&pool)
+    .await?;
 
-    Ok((StatusCode::OK, Json(json!({ "posts": posts }))))
+    let values: Vec<serde_json::Value> = posts.iter().map(|p| p.to_value()).collect();
+    Ok((StatusCode::OK, Json(json!({ "posts": values }))))
 }
 
 pub async fn get_posts_by_business_id(
     State(pool): State<PgPool>,
     Path(business_id): Path<i32>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let posts = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE business_id = $1")
-        .bind(business_id)
-        .fetch_all(&pool)
-        .await?;
+    let posts = sqlx::query_as::<_, PostRow>(
+        &format!("{} WHERE p.business_id = $1 GROUP BY p.id ORDER BY p.created_at DESC", POSTS_WITH_DETAILS_SQL),
+    )
+    .bind(business_id)
+    .fetch_all(&pool)
+    .await?;
 
-    Ok((StatusCode::OK, Json(json!({ "posts": posts }))))
+    let values: Vec<serde_json::Value> = posts.iter().map(|p| p.to_value()).collect();
+    Ok((StatusCode::OK, Json(json!({ "posts": values }))))
 }
 
 pub async fn delete_post(

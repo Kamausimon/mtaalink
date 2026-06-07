@@ -16,8 +16,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Star, MapPin, Phone, Globe, MessageCircle,
-  CheckCircle, Clock, Building2,
+  CheckCircle, Clock, Building2, Heart,
 } from "lucide-react";
+import PostsSection from "@/components/PostsSection";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -31,6 +32,8 @@ export default function BusinessProfilePage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [favLoading, setFavLoading] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
@@ -61,6 +64,34 @@ export default function BusinessProfilePage() {
     }
     load();
   }, [id, router]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+    api.favorites.list(token).then((res) => {
+      const found = res.favorites.some((f) => f.target_type === "business" && f.target_id === Number(id));
+      setIsFavorited(found);
+    }).catch(() => {});
+  }, [id, isAuthenticated, token]);
+
+  async function toggleFavorite() {
+    if (!isAuthenticated) { router.push(`/login?next=/businesses/${id}`); return; }
+    setFavLoading(true);
+    try {
+      if (isFavorited) {
+        await api.favorites.remove(Number(id), "business", token!);
+        setIsFavorited(false);
+        toast.success("Removed from favourites");
+      } else {
+        await api.favorites.add({ target_type: "business", target_id: Number(id) }, token!);
+        setIsFavorited(true);
+        toast.success("Saved to favourites");
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not update favourites");
+    } finally {
+      setFavLoading(false);
+    }
+  }
 
   async function handleBook() {
     if (!isAuthenticated) {
@@ -120,6 +151,7 @@ export default function BusinessProfilePage() {
 
   const avgRating = business.avg_rating;
   const reviewCount = business.review_count ?? 0;
+  const isOwner = isAuthenticated && user?.role === "business" && business.user_id === user?.id;
 
   return (
     <>
@@ -180,6 +212,17 @@ export default function BusinessProfilePage() {
               {isAuthenticated && user?.role === "client" && (
                 <Button variant="outline" size="icon" onClick={() => router.push("/messages")}>
                   <MessageCircle className="h-4 w-4" />
+                </Button>
+              )}
+              {isAuthenticated && user?.role === "client" && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  disabled={favLoading}
+                  onClick={toggleFavorite}
+                  title={isFavorited ? "Remove from favourites" : "Save to favourites"}
+                >
+                  <Heart className={`h-4 w-4 transition-colors ${isFavorited ? "fill-rose-500 text-rose-500" : ""}`} />
                 </Button>
               )}
             </div>
@@ -255,6 +298,9 @@ export default function BusinessProfilePage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Portfolio */}
+        <PostsSection targetType="business" targetId={Number(id)} isOwner={isOwner} />
 
         {/* Reviews */}
         <Card className="border border-border">

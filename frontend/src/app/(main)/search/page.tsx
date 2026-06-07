@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuthStore } from "@/store/auth";
 import { api, type SearchResult } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,7 @@ function ResultCard({ result }: { result: SearchResult }) {
 function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user, _hasHydrated } = useAuthStore();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
@@ -84,6 +86,11 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searched, setSearched] = useState(false);
+
+  useEffect(() => {
+    if (!_hasHydrated) return;
+    if (user && user.role !== "client") router.replace("/dashboard");
+  }, [_hasHydrated, user, router]);
 
   const runSearch = useCallback(async (q: string, cat: string, nextPage = 1, append = false) => {
     if (nextPage === 1) setLoading(true);

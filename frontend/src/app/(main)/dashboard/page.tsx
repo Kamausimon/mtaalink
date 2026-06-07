@@ -15,6 +15,7 @@ import {
   Clock,
   Search,
   ArrowRight,
+  Star,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rating, setRating] = useState<{ average: number; count: number } | null>(null);
 
   useEffect(() => {
     if (!_hasHydrated) return;
@@ -30,11 +32,18 @@ export default function DashboardPage() {
       router.push("/login");
       return;
     }
-    api.dashboard
-      .get(token!)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    api.dashboard.get(token!).then(async (d) => {
+      setData(d);
+      const targetType = d.role === "provider" ? "provider" : d.role === "business" ? "business" : null;
+      const targetId = d.role === "provider" ? d.provider_id : d.business_id;
+      if (targetType && targetId) {
+        try {
+          const agg = await api.reviews.aggregate(targetType, targetId);
+          const r = agg.aggregated_rating;
+          if (r.review_count > 0) setRating({ average: r.average_rating, count: r.review_count });
+        } catch { /* non-critical */ }
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
   }, [_hasHydrated, isAuthenticated, token, router]);
 
   if (loading) {
@@ -94,6 +103,13 @@ export default function DashboardPage() {
             icon={<Wallet className="h-5 w-5 text-primary" />}
             label="Wallet balance"
             value={`KES ${Number(data.balance).toLocaleString()}`}
+          />
+        )}
+        {(isProvider || isBusiness) && rating && (
+          <StatCard
+            icon={<Star className="h-5 w-5 fill-amber-400 text-amber-400" />}
+            label={`Your rating (${rating.count} ${rating.count === 1 ? "review" : "reviews"})`}
+            value={rating.average.toFixed(1)}
           />
         )}
       </div>

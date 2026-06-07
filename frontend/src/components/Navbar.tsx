@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Bell, Menu, X, Search } from "lucide-react";
+import { Bell, Menu, X, Search, Heart } from "lucide-react";
 import { useState } from "react";
 
 export default function Navbar() {
@@ -41,7 +41,10 @@ export default function Navbar() {
         ]
       : isBusiness
       ? [{ href: "/bookings", label: "Bookings" }]
-      : [{ href: "/search", label: "Find Services" }];
+      : [
+          { href: "/search", label: "Find Services" },
+          { href: "/favorites", label: "Favourites" },
+        ];
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-white">
@@ -106,6 +109,12 @@ export default function Navbar() {
                     <DropdownMenuItem onClick={() => router.push("/messages")}>
                       Messages
                     </DropdownMenuItem>
+                    {user.role === "client" && (
+                      <DropdownMenuItem onClick={() => router.push("/favorites")} className="gap-2">
+                        <Heart className="h-4 w-4" />
+                        Favourites
+                      </DropdownMenuItem>
+                    )}
                     {(user.role === "provider" || user.role === "business") && (
                       <DropdownMenuItem onClick={() => router.push("/wallet")}>
                         Wallet
