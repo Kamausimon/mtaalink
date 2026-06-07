@@ -200,10 +200,10 @@ export const api = {
     },
     getById: (id: number, token: string) =>
       request<{ booking: Booking }>(`/bookings/${id}`, { token }),
-    updateStatus: (id: number, status: string, token: string, cancelReason?: string) =>
+    updateStatus: (id: number, status: string, token: string, cancelReason?: string, disputeReason?: string) =>
       request(`/bookings/${id}/status`, {
         method: "POST",
-        body: { status, cancel_reason: cancelReason },
+        body: { status, cancel_reason: cancelReason, dispute_reason: disputeReason },
         token,
       }),
     reschedule: (id: number, scheduledTime: string, token: string) =>
@@ -309,6 +309,30 @@ export const api = {
   // ── Categories ───────────────────────────────────────────────────────────
   categories: {
     all: () => request<{ categories: Category[] }>("/categories/allCategories"),
+  },
+
+  // ── Posts ─────────────────────────────────────────────────────────────────
+  posts: {
+    byProvider: (providerId: number) =>
+      request<{ posts: Post[] }>(`/posts/provider/${providerId}/posts`),
+    byBusiness: (businessId: number) =>
+      request<{ posts: Post[] }>(`/posts/business/${businessId}/posts`),
+    create: (data: { title: string; content: string; provider_id?: number; business_id?: number }, token: string) =>
+      request<{ post_id: number }>("/posts/createPosts", { method: "POST", body: data, token }),
+    update: (id: number, data: { title?: string; content?: string; attachments: string[] }, token: string) =>
+      request(`/posts/updatePost/${id}`, { method: "POST", body: data, token }),
+    delete: (id: number, token: string) =>
+      request(`/posts/deletePost/${id}`, { method: "POST", token }),
+    like: (id: number, token: string) =>
+      request(`/posts/${id}/like`, { method: "POST", token }),
+    unlike: (id: number, token: string) =>
+      request(`/posts/${id}/like`, { method: "DELETE", token }),
+    comments: (id: number) =>
+      request<{ comments: PostComment[]; likes: number }>(`/posts/${id}/comments`),
+    addComment: (id: number, comment: string, token: string) =>
+      request(`/posts/${id}/comments`, { method: "POST", body: { comment }, token }),
+    deleteComment: (postId: number, commentId: number, token: string) =>
+      request(`/posts/${postId}/comments/${commentId}`, { method: "DELETE", token }),
   },
 };
 
@@ -416,6 +440,7 @@ export type ProviderProfile = PublicProvider & {
 
 export type PublicBusiness = {
   id: number;
+  user_id?: number;
   business_name: string;
   description?: string;
   category?: string;
@@ -478,6 +503,7 @@ export type Booking = {
   client_longitude?: number;
   client_phone?: string;
   cancel_reason?: string;
+  dispute_reason?: string;
   created_at?: string;
 };
 
@@ -580,4 +606,24 @@ export type BusinessOnboardInput = {
   email: string;
   website?: string;
   whatsapp?: string;
+};
+
+export type Post = {
+  id: number;
+  title: string;
+  content: string;
+  provider_id?: number;
+  business_id?: number;
+  image_urls: string[];
+  like_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PostComment = {
+  id: number;
+  user_id: number;
+  username: string;
+  comment: string;
+  created_at: string;
 };

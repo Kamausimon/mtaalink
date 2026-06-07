@@ -377,6 +377,7 @@ pub async fn get_booking_by_id(
 pub struct BookingUpdate {
     status: String,
     cancel_reason: Option<String>,
+    dispute_reason: Option<String>,
 }
 
 pub async fn update_booking(
@@ -390,9 +391,8 @@ pub async fn update_booking(
         return Err(AppError::BadRequest("Invalid booking ID".to_string()));
     }
 
-    // Look up the booking to get target info
     let booking = sqlx::query!(
-        "SELECT target_type, target_id FROM bookings WHERE id = $1", id
+        "SELECT target_type, target_id, client_id, status FROM bookings WHERE id = $1", id
     )
     .fetch_optional(&pool)
     .await?
@@ -400,8 +400,7 @@ pub async fn update_booking(
 
     let target_type = booking.target_type.to_lowercase();
 
-    // Verify the current user owns the target
-    let is_owner = match target_type.as_str() {
+    let is_service_owner = match target_type.as_str() {
         "provider" => sqlx::query_scalar!(
             "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
             booking.target_id, user_id
@@ -413,45 +412,66 @@ pub async fn update_booking(
         _ => false,
     };
 
-    if !is_owner {
+    let is_client = booking.client_id == user_id;
+
+    if !is_service_owner && !is_client {
         return Err(AppError::Forbidden("You don't have permission to update this booking".to_string()));
     }
 
     let new_status = payload.status.to_lowercase();
+    let current_status = booking.status.to_lowercase();
+
+    // Role-based transition rules
+    if is_service_owner {
+        // Provider/business may confirm, cancel, or signal completion.
+        // "completed" from the service side means "I'm done — pending client confirmation".
+        let allowed = ["confirmed", "cancelled", "pending_confirmation"];
+        if !allowed.contains(&new_status.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "Providers may only set status to: {}",
+                allowed.join(", ")
+            )));
+        }
+    } else {
+        // Client may only confirm or dispute, and only when awaiting confirmation.
+        if current_status != "pending_confirmation" {
+            return Err(AppError::BadRequest(
+                "You can only confirm or dispute a booking that is awaiting confirmation".to_string(),
+            ));
+        }
+        let allowed = ["completed", "disputed"];
+        if !allowed.contains(&new_status.as_str()) {
+            return Err(AppError::BadRequest(
+                "Clients may only confirm completion or raise a dispute".to_string(),
+            ));
+        }
+    }
 
     sqlx::query!(
-        "UPDATE bookings SET status = $1, cancel_reason = $2 WHERE id = $3",
+        "UPDATE bookings SET status = $1, cancel_reason = $2, dispute_reason = $3 WHERE id = $4",
         new_status,
         payload.cancel_reason.as_deref(),
+        payload.dispute_reason.as_deref(),
         id,
     )
     .execute(&pool)
     .await?;
 
-    // SMS to client when booking is confirmed or cancelled
+    // ── SMS ─────────────────────────────────────────────────────────────────
     if new_status == "confirmed" || new_status == "cancelled" {
         if let Ok(sms_cfg) = SmsConfig::from_env() {
-            // Get client phone from most recent payment for this booking
             let client_phone = sqlx::query_scalar!(
                 "SELECT phone_number FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1",
                 id
             )
-            .fetch_optional(&pool)
-            .await
-            .ok()
-            .flatten();
+            .fetch_optional(&pool).await.ok().flatten();
 
             if let Some(phone) = client_phone {
                 let msg = if new_status == "confirmed" {
-                    let booking = sqlx::query!(
+                    let bk = sqlx::query!(
                         "SELECT service_description, scheduled_time FROM bookings WHERE id = $1", id
-                    )
-                    .fetch_optional(&pool)
-                    .await
-                    .ok()
-                    .flatten();
-
-                    booking.map(|b| booking_confirmation_sms(
+                    ).fetch_optional(&pool).await.ok().flatten();
+                    bk.map(|b| booking_confirmation_sms(
                         id,
                         &b.scheduled_time.format("%d %b %Y %H:%M").to_string(),
                         &b.service_description.unwrap_or_default(),
@@ -459,15 +479,12 @@ pub async fn update_booking(
                 } else {
                     Some(booking_cancelled_sms(id, "Cancelled by provider"))
                 };
-
-                if let Some(m) = msg {
-                    send_sms_best_effort(&sms_cfg, &phone, &m).await;
-                }
+                if let Some(m) = msg { send_sms_best_effort(&sms_cfg, &phone, &m).await; }
             }
         }
     }
 
-    // Email confirmation when booking is confirmed
+    // ── Email ────────────────────────────────────────────────────────────────
     if new_status == "confirmed" {
         if let Ok(email_cfg) = EmailConfig::from_env() {
             let details = sqlx::query!(
@@ -477,13 +494,8 @@ pub async fn update_booking(
                    JOIN users u ON u.id = b.client_id
                    LEFT JOIN providers p ON b.target_type = 'provider' AND b.target_id = p.id
                    LEFT JOIN businesses biz ON b.target_type = 'business' AND b.target_id = biz.id
-                   WHERE b.id = $1"#,
-                id
-            )
-            .fetch_optional(&pool)
-            .await
-            .ok()
-            .flatten();
+                   WHERE b.id = $1"#, id
+            ).fetch_optional(&pool).await.ok().flatten();
 
             if let Some(d) = details {
                 let html = booking_confirmation_html(
@@ -497,23 +509,51 @@ pub async fn update_booking(
         }
     }
 
-    // In-app notification to the client
-    if new_status == "confirmed" || new_status == "cancelled" {
-        let client_id = sqlx::query_scalar!(
-            "SELECT client_id FROM bookings WHERE id = $1", id
-        )
-        .fetch_optional(&pool)
-        .await
-        .ok()
-        .flatten();
+    // ── In-app notifications ─────────────────────────────────────────────────
+    let client_id = booking.client_id;
 
-        if let Some(cid) = client_id {
-            let (title, body) = if new_status == "confirmed" {
-                ("Booking Confirmed", format!("Your booking #{} has been confirmed", id))
+    // Notify client: confirmed / cancelled / pending_confirmation
+    match new_status.as_str() {
+        "confirmed" => {
+            notify_and_push(&pool, &ws_conns, client_id, &new_status,
+                "Booking Confirmed",
+                &format!("Your booking #{} has been confirmed", id),
+                Some("booking"), Some(id)).await;
+        }
+        "cancelled" => {
+            notify_and_push(&pool, &ws_conns, client_id, &new_status,
+                "Booking Cancelled",
+                &format!("Your booking #{} has been cancelled", id),
+                Some("booking"), Some(id)).await;
+        }
+        "pending_confirmation" => {
+            notify_and_push(&pool, &ws_conns, client_id, &new_status,
+                "Job Marked Complete",
+                &format!("The provider says booking #{} is done. Please confirm or raise a dispute.", id),
+                Some("booking"), Some(id)).await;
+        }
+        _ => {}
+    }
+
+    // Notify service owner: client confirmed or disputed
+    if new_status == "completed" || new_status == "disputed" {
+        let provider_user_id: Option<i32> = match target_type.as_str() {
+            "provider" => sqlx::query_scalar!(
+                "SELECT user_id FROM providers WHERE id = $1", booking.target_id
+            ).fetch_optional(&pool).await.ok().flatten(),
+            "business" => sqlx::query_scalar!(
+                "SELECT user_id FROM businesses WHERE id = $1", booking.target_id
+            ).fetch_optional(&pool).await.ok().flatten(),
+            _ => None,
+        };
+
+        if let Some(puid) = provider_user_id {
+            let (title, body) = if new_status == "completed" {
+                ("Job Confirmed", format!("Client confirmed booking #{} is complete", id))
             } else {
-                ("Booking Cancelled", format!("Your booking #{} has been cancelled", id))
+                ("Dispute Raised", format!("Client raised a dispute on booking #{}", id))
             };
-            notify_and_push(&pool, &ws_conns, cid, &new_status, title, &body, Some("booking"), Some(id)).await;
+            notify_and_push(&pool, &ws_conns, puid, &new_status, &title, &body, Some("booking"), Some(id)).await;
         }
     }
 

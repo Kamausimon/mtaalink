@@ -1,5 +1,6 @@
 {
   "rust-analyzer.cargo.extraEnv": {
-    "DATABASE_URL": "postgres://postgres:Kamau0746@localhost:5432/postgres"
+    "DATABASE_URL": "postgres://postgres:Kamau0746@localhost:5432/postgres",
+    "SQLX_OFFLINE": "true"
   }
 }

@@ -9,9 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Send, MessageCircle } from "lucide-react";
-import { format } from "date-fns";
+import { format, isToday, isThisYear } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+function formatConvTime(iso: string) {
+  const d = new Date(iso);
+  if (isToday(d)) return format(d, "h:mm a");
+  if (isThisYear(d)) return format(d, "d MMM");
+  return format(d, "d MMM yyyy");
+}
 
 export default function MessagesPage() {
   const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
@@ -107,39 +114,51 @@ export default function MessagesPage() {
                 <p className="text-xs text-muted-foreground">No conversations yet</p>
               </div>
             ) : (
-              conversations.map((conv) => (
-                <button
-                  key={`${conv.other_user_id}-${conv.target_id}`}
-                  type="button"
-                  onClick={() => setSelected(conv)}
-                  className={cn(
-                    "w-full text-left px-3 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors border-b border-border/50",
-                    selected?.other_user_id === conv.other_user_id &&
-                      "bg-primary/5 border-l-2 border-l-primary",
-                  )}
-                >
-                  <Avatar className="h-9 w-9 shrink-0">
-                    <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                      {conv.other_username.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {conv.other_username}
-                      </span>
-                      {conv.unread_count > 0 && (
-                        <span className="text-xs bg-primary text-white rounded-full h-5 w-5 flex items-center justify-center shrink-0 ml-1">
-                          {conv.unread_count}
+              conversations.map((conv) => {
+                const unread = conv.unread_count > 0;
+                const isSelected = selected?.other_user_id === conv.other_user_id && selected?.target_id === conv.target_id;
+                return (
+                  <button
+                    key={`${conv.other_user_id}-${conv.target_id}`}
+                    type="button"
+                    onClick={() => setSelected(conv)}
+                    className={cn(
+                      "w-full text-left px-3 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors border-b border-border/50",
+                      isSelected && "bg-primary/5 border-l-2 border-l-primary",
+                      unread && !isSelected && "bg-blue-50/50",
+                    )}
+                  >
+                    <Avatar className="h-9 w-9 shrink-0">
+                      <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                        {conv.other_username.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={cn("text-sm truncate", unread ? "font-semibold text-foreground" : "font-medium text-foreground")}>
+                          {conv.other_username}
                         </span>
-                      )}
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {formatConvTime(conv.last_message_at)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-1 mt-0.5">
+                        <p className={cn("text-xs truncate", unread ? "text-foreground font-medium" : "text-muted-foreground")}>
+                          {conv.last_message}
+                        </p>
+                        {unread && (
+                          <span className="text-xs bg-primary text-white rounded-full h-4 w-4 flex items-center justify-center shrink-0 font-medium">
+                            {conv.unread_count > 9 ? "9+" : conv.unread_count}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground/60 mt-0.5 capitalize">
+                        via {conv.target_type}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {conv.last_message}
-                    </p>
-                  </div>
-                </button>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
@@ -159,37 +178,40 @@ export default function MessagesPage() {
             <>
               {/* Header */}
               <div className="px-4 py-3 border-b border-border">
-                <p className="font-semibold text-sm text-foreground">
-                  {selected.other_username}
-                </p>
+                <p className="font-semibold text-sm text-foreground">{selected.other_username}</p>
+                <p className="text-xs text-muted-foreground capitalize">via {selected.target_type}</p>
               </div>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.map((msg) => {
+                {messages.map((msg, i) => {
                   const isMe = msg.sender_id === user?.id;
+                  const msgDate = new Date(msg.created_at);
+                  const prevDate = i > 0 ? new Date(messages[i - 1].created_at) : null;
+                  const showDateSep = !prevDate || format(msgDate, "yyyy-MM-dd") !== format(prevDate, "yyyy-MM-dd");
                   return (
-                    <div
-                      key={msg.id}
-                      className={cn("flex", isMe ? "justify-end" : "justify-start")}
-                    >
-                      <div
-                        className={cn(
-                          "max-w-xs px-3 py-2 rounded-2xl text-sm",
-                          isMe
-                            ? "bg-primary text-white rounded-br-sm"
-                            : "bg-muted text-foreground rounded-bl-sm",
-                        )}
-                      >
-                        <p>{msg.content}</p>
-                        <p
+                    <div key={msg.id}>
+                      {showDateSep && (
+                        <div className="flex items-center gap-2 my-2">
+                          <div className="flex-1 h-px bg-border" />
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {isToday(msgDate) ? "Today" : format(msgDate, "d MMM yyyy")}
+                          </span>
+                          <div className="flex-1 h-px bg-border" />
+                        </div>
+                      )}
+                      <div className={cn("flex", isMe ? "justify-end" : "justify-start")}>
+                        <div
                           className={cn(
-                            "text-xs mt-1",
-                            isMe ? "text-white/60" : "text-muted-foreground",
+                            "max-w-xs px-3 py-2 rounded-2xl text-sm",
+                            isMe ? "bg-primary text-white rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm",
                           )}
                         >
-                          {format(new Date(msg.created_at), "h:mm a")}
-                        </p>
+                          <p>{msg.content}</p>
+                          <p className={cn("text-xs mt-1", isMe ? "text-white/60" : "text-muted-foreground")}>
+                            {format(msgDate, "h:mm a")}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   );
