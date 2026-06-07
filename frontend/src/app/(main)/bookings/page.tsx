@@ -54,7 +54,7 @@ export default function BookingsPage() {
     const reason = window.prompt("Reason for cancellation (optional):");
     if (reason === null) return; // user hit Cancel
     try {
-      await api.bookings.delete(id, token!);
+      await api.bookings.updateStatus(id, "cancelled", token!, reason || undefined);
       toast.success("Booking cancelled");
       loadBookings();
     } catch {

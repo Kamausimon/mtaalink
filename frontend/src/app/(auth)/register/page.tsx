@@ -65,7 +65,13 @@ function RegisterForm() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      const res = await api.auth.register(data);
+      const res = await api.auth.register({
+        ...data,
+        confirm_password: data.password,
+        // Required by the API for provider/business roles — filled in during onboarding
+        service_description: data.role === "provider" ? "Profile setup in progress" : undefined,
+        business_name: data.role === "business" ? data.username : undefined,
+      });
       setAuth(res.token, res.user);
       toast.success("Account created! Welcome to MtaaLink.");
       if (data.role === "provider") router.push("/onboard/provider");

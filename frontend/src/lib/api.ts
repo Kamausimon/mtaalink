@@ -47,7 +47,10 @@ export const api = {
       username: string;
       email: string;
       password: string;
+      confirm_password: string;
       role: string;
+      service_description?: string;
+      business_name?: string;
     }) => request<{ token: string; user: User }>("/auth/register", { method: "POST", body: data }),
 
     login: (data: { email: string; password: string }) =>

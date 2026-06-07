@@ -2,12 +2,73 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { api, type PublicProvider } from "@/lib/api";
-import ProviderCard from "@/components/ProviderCard";
+import Link from "next/link";
+import { api, type SearchResult } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Search, SlidersHorizontal, Star, MapPin } from "lucide-react";
+
+function ResultCard({ result }: { result: SearchResult }) {
+  const href = result.type === "business" ? `/businesses/${result.id}` : `/providers/${result.id}`;
+  const initials = result.name?.slice(0, 2).toUpperCase() ?? "??";
+
+  return (
+    <Link href={href}>
+      <Card className="border border-border hover:border-primary hover:shadow-sm transition-all cursor-pointer h-full">
+        <CardContent className="p-4 flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <Avatar className="h-12 w-12 shrink-0">
+              <AvatarImage src={result.profile_photo ?? undefined} alt={result.name ?? ""} />
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-foreground text-sm leading-tight truncate">
+                {result.name}
+              </h3>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                {result.category && (
+                  <Badge variant="secondary" className="text-xs font-normal">
+                    {result.category}
+                  </Badge>
+                )}
+                {result.type === "business" && (
+                  <Badge variant="outline" className="text-xs font-normal">Business</Badge>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {result.location && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">{result.location}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-auto pt-1 border-t border-border">
+            {result.avg_rating != null ? (
+              <div className="flex items-center gap-1">
+                <Star className="h-3.5 w-3.5 fill-accent text-accent" />
+                <span className="text-sm font-medium">{result.avg_rating.toFixed(1)}</span>
+                <span className="text-xs text-muted-foreground">
+                  ({result.review_count ?? 0} {(result.review_count ?? 0) === 1 ? "review" : "reviews"})
+                </span>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">No reviews yet</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -15,7 +76,7 @@ function SearchContent() {
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
-  const [providers, setProviders] = useState<PublicProvider[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
@@ -27,7 +88,6 @@ function SearchContent() {
       setCategory(cat ?? "");
       runSearch(q ?? "", cat ?? "");
     } else {
-      // Show all providers by default
       runSearch("", "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -37,13 +97,13 @@ function SearchContent() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await api.providers.list({
+      const res = await api.search.query({
+        q: q || undefined,
         category: cat || undefined,
-        location: q || undefined,
       });
-      setProviders(res.providers);
+      setResults(res.results);
     } catch {
-      setProviders([]);
+      setResults([]);
     } finally {
       setLoading(false);
     }
@@ -72,7 +132,7 @@ function SearchContent() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Service or location…"
+            placeholder="Search services, providers, or businesses…"
             className="pl-9 bg-white"
           />
         </div>
@@ -115,21 +175,21 @@ function SearchContent() {
             <Skeleton key={i} className="h-36 rounded-lg" />
           ))}
         </div>
-      ) : providers.length > 0 ? (
+      ) : results.length > 0 ? (
         <>
           <p className="text-sm text-muted-foreground mb-4">
-            {providers.length} provider{providers.length !== 1 ? "s" : ""} found
+            {results.length} result{results.length !== 1 ? "s" : ""} found
           </p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {providers.map((p) => (
-              <ProviderCard key={p.id} provider={p} />
+            {results.map((r) => (
+              <ResultCard key={`${r.type}-${r.id}`} result={r} />
             ))}
           </div>
         </>
       ) : searched ? (
         <div className="text-center py-16">
           <SlidersHorizontal className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-          <p className="font-medium text-foreground mb-1">No providers found</p>
+          <p className="font-medium text-foreground mb-1">No results found</p>
           <p className="text-sm text-muted-foreground">
             Try a different search or clear the category filter.
           </p>

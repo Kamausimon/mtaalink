@@ -32,7 +32,6 @@ export default function Navbar() {
 
   const navLinks = [
     { href: "/search", label: "Find Services" },
-    { href: "/categories", label: "Categories" },
   ];
 
   return (

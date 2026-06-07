@@ -75,6 +75,10 @@ export default function BusinessProfilePage() {
       toast.error("Please pick a date and time");
       return;
     }
+    if (!bookingForm.service_description && !selectedService) {
+      toast.error("Please describe the work needed");
+      return;
+    }
     setBookingLoading(true);
     try {
       const res = await api.bookings.create(
@@ -305,7 +309,7 @@ export default function BusinessProfilePage() {
               <Label>Date &amp; time</Label>
               <Input type="datetime-local" value={bookingForm.scheduled_time}
                 onChange={(e) => setBookingForm((f) => ({ ...f, scheduled_time: e.target.value }))}
-                min={new Date().toISOString().slice(0, 16)} />
+                min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} />
             </div>
             <div className="space-y-1.5">
               <Label>Describe what you need</Label>

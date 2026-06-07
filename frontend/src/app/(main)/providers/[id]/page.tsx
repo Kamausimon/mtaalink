@@ -336,7 +336,7 @@ export default function ProviderProfilePage() {
                 onChange={(e) =>
                   setBookingForm((f) => ({ ...f, scheduled_time: e.target.value }))
                 }
-                min={new Date().toISOString().slice(0, 16)}
+                min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
               />
             </div>
 
