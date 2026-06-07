@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export default function MessagesPage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
@@ -25,6 +25,7 @@ export default function MessagesPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     if (!isAuthenticated) {
       router.push("/login");
       return;
@@ -34,7 +35,7 @@ export default function MessagesPage() {
       .then((r) => setConversations(r.conversations))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [isAuthenticated, token, router]);
+  }, [_hasHydrated, isAuthenticated, token, router]);
 
   useEffect(() => {
     if (!selected) return;

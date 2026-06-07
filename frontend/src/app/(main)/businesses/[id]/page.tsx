@@ -24,7 +24,7 @@ import { format } from "date-fns";
 export default function BusinessProfilePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { token, isAuthenticated } = useAuthStore();
+  const { token, isAuthenticated, user } = useAuthStore();
 
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -88,7 +88,9 @@ export default function BusinessProfilePage() {
           service_id: selectedService?.id,
           service_description:
             bookingForm.service_description || selectedService?.title || "",
-          scheduled_time: bookingForm.scheduled_time,
+          scheduled_time: bookingForm.scheduled_time.length === 16
+            ? bookingForm.scheduled_time + ":00"
+            : bookingForm.scheduled_time,
           client_phone: bookingForm.client_phone || undefined,
           client_address: bookingForm.client_address || undefined,
         },
@@ -175,7 +177,7 @@ export default function BusinessProfilePage() {
                   <Button variant="outline" size="icon"><Globe className="h-4 w-4" /></Button>
                 </a>
               )}
-              {isAuthenticated && (
+              {isAuthenticated && user?.role === "client" && (
                 <Button variant="outline" size="icon" onClick={() => router.push("/messages")}>
                   <MessageCircle className="h-4 w-4" />
                 </Button>

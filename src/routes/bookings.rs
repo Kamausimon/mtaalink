@@ -255,7 +255,8 @@ pub async fn get_bookings_client(
 pub struct BookingsQueryByReceiver {
     target_type: String,
     target_id: i32,
-    status: String,
+    /// Filter by status. Omit or pass "all" to return every status.
+    status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -293,6 +294,11 @@ pub async fn get_bookings_received(
         return Err(AppError::BadRequest("Invalid target ID".to_string()));
     }
 
+    let status_filter = params
+        .status
+        .as_deref()
+        .filter(|s| !s.is_empty() && *s != "all");
+
     let rows = sqlx::query!(
         r#"SELECT b.id, b.client_id, b.target_type, b.target_id, b.branch_id, b.service_id,
                b.service_description, b.scheduled_time, b.status, b.duration, b.created_at,
@@ -302,11 +308,12 @@ pub async fn get_bookings_received(
         FROM bookings b
         LEFT JOIN users u ON b.client_id = u.id
         LEFT JOIN services s ON b.service_id = s.id
-        WHERE b.target_type = $1 AND b.target_id = $2 AND b.status = $3
+        WHERE b.target_type = $1 AND b.target_id = $2
+          AND ($3::text IS NULL OR b.status = $3)
         ORDER BY b.scheduled_time DESC"#,
         target_type,
         params.target_id,
-        params.status
+        status_filter
     )
     .fetch_all(&pool)
     .await?;

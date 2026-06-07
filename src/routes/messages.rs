@@ -93,7 +93,6 @@ pub async fn send_message(
         Some("message"), Some(message.id),
     ).await;
 
-    // Push to receiver's WebSocket connection if they are online
     push_to_user(&ws_conns, payload.receiver_id, "new_message", json!({
         "id": message.id,
         "sender_id": message.sender_id,
@@ -106,11 +105,13 @@ pub async fn send_message(
     Ok((StatusCode::CREATED, Json(json!({ "message": message }))))
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+// ── Get messages in a thread ──────────────────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
 pub struct MessageQuery {
+    pub other_user_id: i32,
     pub target_type: String,
     pub target_id: i32,
-    pub with_user: i32,
     page: Option<i32>,
     limit: Option<i32>,
 }
@@ -124,30 +125,27 @@ pub async fn get_messages(
     if !["provider", "business"].contains(&target_type.as_str()) {
         return Err(AppError::BadRequest("Invalid target type".to_string()));
     }
-    if params.target_id <= 0 || params.with_user <= 0 {
-        return Err(AppError::BadRequest("Invalid target ID or user ID".to_string()));
-    }
 
-    let page = params.page.unwrap_or(1);
-    let limit = params.limit.unwrap_or(10);
+    let page = params.page.unwrap_or(1).max(1);
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
     let offset = (page - 1) * limit;
-
-    let receiver_id = get_target_id(&pool, user_id, &target_type)
-        .await
-        .map_err(|_| AppError::Forbidden("You are not allowed to view these messages".to_string()))?;
 
     let messages = sqlx::query_as::<sqlx::Postgres, Message>(
         "SELECT id, sender_id, receiver_id, content, target_type, target_id, created_at, read_at, is_read
          FROM messages
-         WHERE (target_type = $1 AND target_id = $2 AND ((sender_id = $3 AND receiver_id = $4) OR (sender_id = $4 AND receiver_id = $3)))
-         OR (sender_id = $4 AND receiver_id = $3)
-         ORDER BY created_at DESC
+         WHERE (
+             (sender_id = $1 AND receiver_id = $2) OR
+             (sender_id = $2 AND receiver_id = $1)
+         )
+         AND target_type = $3
+         AND target_id = $4
+         ORDER BY created_at ASC
          LIMIT $5 OFFSET $6",
     )
-    .bind(target_type)
+    .bind(user_id)
+    .bind(params.other_user_id)
+    .bind(&target_type)
     .bind(params.target_id)
-    .bind(receiver_id)
-    .bind(params.with_user)
     .bind(limit as i64)
     .bind(offset as i64)
     .fetch_all(&pool)
@@ -156,30 +154,11 @@ pub async fn get_messages(
     Ok((StatusCode::OK, Json(json!({ "messages": messages }))))
 }
 
-async fn get_target_id(pool: &PgPool, user_id: i32, target_type: &str) -> Result<i32, sqlx::Error> {
-    match target_type {
-        "provider" => {
-            let r = sqlx::query!("SELECT id FROM providers WHERE user_id = $1", user_id)
-                .fetch_one(pool)
-                .await?;
-            Ok(r.id)
-        }
-        "business" => {
-            let r = sqlx::query!("SELECT id FROM businesses WHERE user_id = $1", user_id)
-                .fetch_one(pool)
-                .await?;
-            Ok(r.id)
-        }
-        _ => Err(sqlx::Error::RowNotFound),
-    }
-}
+// ── Mark messages as read ─────────────────────────────────────────────────────
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct MarkReadPayload {
-    target_type: String,
-    target_id: i32,
-    sender_id: i32,
-    message_ids: Vec<i32>,
+    pub message_ids: Vec<i32>,
 }
 
 pub async fn mark_messages_as_read(
@@ -191,18 +170,6 @@ pub async fn mark_messages_as_read(
         return Err(AppError::BadRequest("Message ID list cannot be empty".to_string()));
     }
 
-    let target_type = payload.target_type.to_lowercase();
-    if target_type.is_empty() || !["provider", "business"].contains(&target_type.as_str()) {
-        return Err(AppError::BadRequest("Invalid target type".to_string()));
-    }
-    if payload.target_id <= 0 || payload.sender_id <= 0 {
-        return Err(AppError::BadRequest("Invalid target ID or sender ID".to_string()));
-    }
-
-    let receiver_id = get_target_id(&pool, user_id, &target_type)
-        .await
-        .map_err(|_| AppError::Forbidden("You are not allowed to view these messages".to_string()))?;
-
     let now = chrono::Utc::now().naive_utc();
 
     sqlx::query!(
@@ -210,7 +177,7 @@ pub async fn mark_messages_as_read(
          WHERE id = ANY($2) AND receiver_id = $3 AND is_read = FALSE",
         now,
         &payload.message_ids,
-        receiver_id
+        user_id
     )
     .execute(&pool)
     .await?;
@@ -218,24 +185,15 @@ pub async fn mark_messages_as_read(
     Ok((StatusCode::OK, Json(json!({ "message": "Messages marked as read successfully" }))))
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct UnreadMessagesCount {
-    pub target_type: String,
-}
+// ── Unread message count ──────────────────────────────────────────────────────
 
 pub async fn get_unread_messages_count(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Query(params): Query<UnreadMessagesCount>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let target_type = params.target_type.to_lowercase();
-    let receiver_id = get_target_id(&pool, user_id, &target_type)
-        .await
-        .map_err(|_| AppError::Forbidden("You are not allowed to view these messages".to_string()))?;
-
     let count = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND is_read = FALSE",
-        receiver_id
+        user_id
     )
     .fetch_one(&pool)
     .await?;
@@ -243,75 +201,70 @@ pub async fn get_unread_messages_count(
     Ok((StatusCode::OK, Json(json!({ "unread_count": count }))))
 }
 
-#[derive(Serialize, sqlx::FromRow, Debug, Deserialize)]
-pub struct ConversationResponse {
-    pub participant_id: Option<i32>,
-    pub participant_name: Option<String>,
-    pub last_message: Option<String>,
-    pub last_message_time: Option<NaiveDateTime>,
-    pub unread_count: Option<i64>,
-    pub user_type: Option<String>,
-}
+// ── Conversations list ────────────────────────────────────────────────────────
 
-#[derive(Deserialize, Debug)]
-pub struct ConversationsQuery {
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct ConversationRow {
+    pub other_user_id: i32,
+    pub other_username: String,
     pub target_type: String,
+    pub target_id: i32,
+    pub last_message: String,
+    pub last_message_at: NaiveDateTime,
+    pub unread_count: i64,
 }
 
 pub async fn get_conversations(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Query(params): Query<ConversationsQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let target_type = params.target_type.to_lowercase();
-    let entity_id = get_target_id(&pool, user_id, &target_type)
-        .await
-        .map_err(|_| AppError::Forbidden("You are not allowed to view these conversations".to_string()))?;
-
-    let conversations = sqlx::query_as!(
-        ConversationResponse,
+    // Return one row per unique (other_user, target_type, target_id) thread,
+    // with the latest message and unread count. Works for any role.
+    let conversations = sqlx::query_as::<sqlx::Postgres, ConversationRow>(
         r#"
-        WITH conversation_partners AS (
-            SELECT DISTINCT sender_id AS participant_id FROM messages
-            WHERE receiver_id = $1 AND target_type = $2
-            UNION
-            SELECT DISTINCT receiver_id AS participant_id FROM messages
-            WHERE sender_id = $1 AND target_type = $2
-        ),
-        last_messages AS (
+        WITH ranked AS (
             SELECT
-                CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS participant_id,
+                CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS other_user_id,
+                target_type,
+                target_id,
                 content AS last_message,
-                created_at AS last_message_time,
+                created_at AS last_message_at,
                 ROW_NUMBER() OVER (
-                    PARTITION BY CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END
+                    PARTITION BY
+                        CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END,
+                        target_type,
+                        target_id
                     ORDER BY created_at DESC
                 ) AS rn
             FROM messages
-            WHERE (sender_id = $1 AND target_type = $2) OR (receiver_id = $1 AND target_type = $2)
+            WHERE sender_id = $1 OR receiver_id = $1
         ),
         unread_counts AS (
-            SELECT sender_id AS participant_id, COUNT(*) AS unread_count
+            SELECT sender_id AS other_user_id, target_type, target_id,
+                   COUNT(*) AS unread_count
             FROM messages
-            WHERE receiver_id = $1 AND is_read = FALSE AND target_type = $2
-            GROUP BY sender_id
+            WHERE receiver_id = $1 AND is_read = FALSE
+            GROUP BY sender_id, target_type, target_id
         )
         SELECT
-            COALESCE(cp.participant_id, 0) AS participant_id,
-            COALESCE(u.username, '') AS participant_name,
-            lm.last_message,
-            lm.last_message_time,
-            COALESCE(uc.unread_count, 0) AS unread_count,
-            COALESCE((SELECT role FROM users WHERE id = cp.participant_id), 'unknown') AS user_type
-        FROM conversation_partners cp
-        LEFT JOIN users u ON cp.participant_id = u.id
-        LEFT JOIN last_messages lm ON cp.participant_id = lm.participant_id AND lm.rn = 1
-        LEFT JOIN unread_counts uc ON cp.participant_id = uc.participant_id
-        ORDER BY lm.last_message_time DESC NULLS LAST
+            r.other_user_id,
+            u.username AS other_username,
+            r.target_type,
+            r.target_id,
+            r.last_message,
+            r.last_message_at,
+            COALESCE(uc.unread_count, 0) AS unread_count
+        FROM ranked r
+        JOIN users u ON u.id = r.other_user_id
+        LEFT JOIN unread_counts uc
+            ON  uc.other_user_id = r.other_user_id
+            AND uc.target_type   = r.target_type
+            AND uc.target_id     = r.target_id
+        WHERE r.rn = 1
+        ORDER BY r.last_message_at DESC
         "#,
-        entity_id,
-        target_type
     )
+    .bind(user_id)
     .fetch_all(&pool)
     .await?;
 

@@ -15,6 +15,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,9 +26,9 @@ import {
   Phone,
   Globe,
   MessageCircle,
-  Heart,
   CheckCircle,
   Clock,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -35,7 +36,7 @@ import { format } from "date-fns";
 export default function ProviderProfilePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { token, isAuthenticated } = useAuthStore();
+  const { token, isAuthenticated, user } = useAuthStore();
 
   const [provider, setProvider] = useState<ProviderProfile | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -44,6 +45,11 @@ export default function ProviderProfilePage() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [messageText, setMessageText] = useState("");
+  const [messageSending, setMessageSending] = useState(false);
+  const [availability, setAvailability] = useState<import("@/lib/api").Availability[] | null>(null);
   const [bookingForm, setBookingForm] = useState({
     scheduled_time: "",
     service_description: "",
@@ -77,6 +83,15 @@ export default function ProviderProfilePage() {
       return;
     }
     setBookingOpen(true);
+    // Lazily fetch availability once
+    if (availability === null) {
+      try {
+        const res = await api.providers.availability.get(Number(id));
+        setAvailability(res.schedule ?? []);
+      } catch {
+        setAvailability([]);
+      }
+    }
   }
 
   async function submitBooking() {
@@ -88,6 +103,18 @@ export default function ProviderProfilePage() {
       toast.error("Please describe the work needed");
       return;
     }
+
+    // Check provider availability for the selected day
+    if (availability && availability.length > 0) {
+      const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const selectedDate = new Date(bookingForm.scheduled_time);
+      const dayName = DAYS[selectedDate.getDay()];
+      const daySchedule = availability.find((a) => a.day === dayName);
+      if (daySchedule && !daySchedule.is_available) {
+        toast.error(`This provider is not available on ${dayName}s. Please choose a different day.`);
+        return;
+      }
+    }
     setBookingLoading(true);
     try {
       const res = await api.bookings.create(
@@ -97,7 +124,9 @@ export default function ProviderProfilePage() {
           service_id: selectedService?.id,
           service_description:
             bookingForm.service_description || selectedService?.title || "",
-          scheduled_time: bookingForm.scheduled_time,
+          scheduled_time: bookingForm.scheduled_time.length === 16
+            ? bookingForm.scheduled_time + ":00"
+            : bookingForm.scheduled_time,
           client_phone: bookingForm.client_phone || undefined,
           client_address: bookingForm.client_address || undefined,
         },
@@ -110,6 +139,37 @@ export default function ProviderProfilePage() {
       toast.error(err instanceof Error ? err.message : "Booking failed");
     } finally {
       setBookingLoading(false);
+    }
+  }
+
+  async function sendMessage() {
+    if (!messageText.trim()) {
+      toast.error("Please write a message");
+      return;
+    }
+    if (!provider?.user_id) {
+      toast.error("Cannot send message to this provider");
+      return;
+    }
+    setMessageSending(true);
+    try {
+      await api.messages.send(
+        {
+          receiver_id: provider.user_id,
+          content: messageText.trim(),
+          target_type: "provider",
+          target_id: Number(id),
+        },
+        token!,
+      );
+      toast.success("Message sent");
+      setMessageOpen(false);
+      setMessageText("");
+      router.push("/messages");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setMessageSending(false);
     }
   }
 
@@ -187,11 +247,14 @@ export default function ProviderProfilePage() {
                 Book this provider
               </Button>
               {provider.phone_number && (
-                <a href={`tel:${provider.phone_number}`}>
-                  <Button variant="outline" size="icon">
-                    <Phone className="h-4 w-4" />
-                  </Button>
-                </a>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setContactOpen(true)}
+                  title="View contact number"
+                >
+                  <Phone className="h-4 w-4" />
+                </Button>
               )}
               {provider.website && (
                 <a href={provider.website} target="_blank" rel="noopener noreferrer">
@@ -200,11 +263,12 @@ export default function ProviderProfilePage() {
                   </Button>
                 </a>
               )}
-              {isAuthenticated && (
+              {isAuthenticated && user?.role === "client" && (
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => router.push("/messages")}
+                  onClick={() => setMessageOpen(true)}
+                  title="Send a message"
                 >
                   <MessageCircle className="h-4 w-4" />
                 </Button>
@@ -309,6 +373,78 @@ export default function ProviderProfilePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Contact dialog */}
+      <Dialog open={contactOpen} onOpenChange={setContactOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Contact {provider.service_name}</DialogTitle>
+            <DialogDescription>
+              Call or copy the number below to get in touch directly.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between gap-3 px-3 py-3 bg-muted rounded-lg mt-2">
+            <div className="flex items-center gap-2">
+              <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="text-sm font-medium">{provider.phone_number}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => {
+                  navigator.clipboard.writeText(provider.phone_number!);
+                  toast.success("Number copied");
+                }}
+                title="Copy number"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+              <a href={`tel:${provider.phone_number}`}>
+                <Button size="sm" className="gap-1.5">
+                  <Phone className="h-3.5 w-3.5" />
+                  Call
+                </Button>
+              </a>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Message dialog */}
+      <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Message {provider.service_name}</DialogTitle>
+            <DialogDescription>
+              Send a message to this provider. They will reply in the Messages tab.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <Textarea
+              placeholder={`Hi, I'd like to enquire about your services…`}
+              rows={5}
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              className="resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setMessageOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={sendMessage}
+                disabled={messageSending || !messageText.trim()}
+                className="gap-2"
+              >
+                <MessageCircle className="h-4 w-4" />
+                {messageSending ? "Sending…" : "Send message"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Booking dialog */}
       <Dialog open={bookingOpen} onOpenChange={setBookingOpen}>

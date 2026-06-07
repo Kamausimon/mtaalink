@@ -30,16 +30,25 @@ export default function Navbar() {
     router.push("/");
   }
 
-  const navLinks = [
-    { href: "/search", label: "Find Services" },
-  ];
+  const isProvider = user?.role === "provider";
+  const isBusiness = user?.role === "business";
+
+  const navLinks =
+    isProvider
+      ? [
+          { href: "/bookings", label: "Bookings" },
+          { href: "/availability", label: "Availability" },
+        ]
+      : isBusiness
+      ? [{ href: "/bookings", label: "Bookings" }]
+      : [{ href: "/search", label: "Find Services" }];
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-white">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="flex h-16 items-center justify-between gap-4">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 shrink-0">
+          <Link href={isAuthenticated ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0">
             <span className="text-xl font-bold text-primary tracking-tight">
               Mtaa<span className="text-accent">Link</span>
             </span>

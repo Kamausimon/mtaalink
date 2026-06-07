@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, type SearchResult } from "@/lib/api";
@@ -10,7 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, SlidersHorizontal, Star, MapPin } from "lucide-react";
+import { Search, SlidersHorizontal, Star, MapPin, Loader2 } from "lucide-react";
+
+const PER_PAGE = 12;
 
 function ResultCard({ result }: { result: SearchResult }) {
   const href = result.type === "business" ? `/businesses/${result.id}` : `/providers/${result.id}`;
@@ -77,37 +79,43 @@ function SearchContent() {
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  useEffect(() => {
-    const q = searchParams.get("q");
-    const cat = searchParams.get("category");
-    if (q || cat) {
-      setQuery(q ?? "");
-      setCategory(cat ?? "");
-      runSearch(q ?? "", cat ?? "");
-    } else {
-      runSearch("", "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function runSearch(q: string, cat: string) {
-    setLoading(true);
+  const runSearch = useCallback(async (q: string, cat: string, nextPage = 1, append = false) => {
+    if (nextPage === 1) setLoading(true);
+    else setLoadingMore(true);
     setSearched(true);
+
     try {
       const res = await api.search.query({
         q: q || undefined,
         category: cat || undefined,
+        page: nextPage,
+        per_page: PER_PAGE,
       });
-      setResults(res.results);
+      setResults((prev) => (append ? [...prev, ...res.results] : res.results));
+      setTotal(res.total);
+      setPage(nextPage);
     } catch {
-      setResults([]);
+      if (!append) setResults([]);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const q = searchParams.get("q");
+    const cat = searchParams.get("category");
+    setQuery(q ?? "");
+    setCategory(cat ?? "");
+    runSearch(q ?? "", cat ?? "", 1, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -115,8 +123,19 @@ function SearchContent() {
     if (query) qs.set("q", query);
     if (category) qs.set("category", category);
     router.push(`/search?${qs}`);
-    runSearch(query, category);
+    runSearch(query, category, 1, false);
   }
+
+  function selectCategory(cat: string) {
+    setCategory(cat);
+    runSearch(query, cat, 1, false);
+  }
+
+  function loadMore() {
+    runSearch(query, category, page + 1, true);
+  }
+
+  const hasMore = results.length < total;
 
   const CATEGORIES = [
     "Plumbing", "Electrical", "Cleaning", "Tutoring",
@@ -143,7 +162,7 @@ function SearchContent() {
       <div className="flex flex-wrap gap-2 mb-8">
         <button
           type="button"
-          onClick={() => { setCategory(""); runSearch(query, ""); }}
+          onClick={() => selectCategory("")}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
             !category
               ? "bg-primary text-white border-primary"
@@ -156,7 +175,7 @@ function SearchContent() {
           <button
             key={cat}
             type="button"
-            onClick={() => { setCategory(cat); runSearch(query, cat); }}
+            onClick={() => selectCategory(cat)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
               category === cat
                 ? "bg-primary text-white border-primary"
@@ -178,20 +197,46 @@ function SearchContent() {
       ) : results.length > 0 ? (
         <>
           <p className="text-sm text-muted-foreground mb-4">
-            {results.length} result{results.length !== 1 ? "s" : ""} found
+            Showing {results.length} of {total} result{total !== 1 ? "s" : ""}
+            {(query || category) && (
+              <span>
+                {query && <> for <strong>&ldquo;{query}&rdquo;</strong></>}
+                {category && <> in <strong>{category}</strong></>}
+              </span>
+            )}
           </p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {results.map((r) => (
               <ResultCard key={`${r.type}-${r.id}`} result={r} />
             ))}
           </div>
+
+          {hasMore && (
+            <div className="flex justify-center mt-8">
+              <Button
+                variant="outline"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="gap-2 min-w-32"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  `Load more (${total - results.length} remaining)`
+                )}
+              </Button>
+            </div>
+          )}
         </>
       ) : searched ? (
         <div className="text-center py-16">
           <SlidersHorizontal className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="font-medium text-foreground mb-1">No results found</p>
           <p className="text-sm text-muted-foreground">
-            Try a different search or clear the category filter.
+            Try different keywords or clear the category filter.
           </p>
         </div>
       ) : null}
