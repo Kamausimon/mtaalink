@@ -13,16 +13,17 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export default function NotificationsPage() {
-  const { token, isAuthenticated } = useAuthStore();
+  const { token, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     if (!isAuthenticated) { router.push("/login"); return; }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [_hasHydrated, isAuthenticated]);
 
   async function load() {
     try {

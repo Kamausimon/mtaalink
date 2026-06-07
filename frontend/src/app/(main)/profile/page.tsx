@@ -18,33 +18,79 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// Allow empty string (field untouched) or a string meeting the minimum length.
+// Empty strings are converted to undefined in onSubmit so the backend skips them.
+const optStr = (min?: number, label?: string) =>
+  z
+    .string()
+    .refine((v) => v === "" || !min || v.length >= min, {
+      message: `${label ?? "Field"} must be at least ${min} characters`,
+    })
+    .optional();
+
 const providerSchema = z.object({
-  service_name: z.string().min(3).optional(),
-  service_description: z.string().min(10).optional(),
+  service_name: optStr(3, "Service name"),
+  service_description: optStr(10, "Description"),
   location: z.string().optional(),
   phone_number: z.string().optional(),
-  email: z.string().email().optional(),
-  website: z.string().url().optional().or(z.literal("")),
+  email: z
+    .string()
+    .refine((v) => v === "" || z.string().email().safeParse(v).success, {
+      message: "Invalid email address",
+    })
+    .optional(),
+  website: z
+    .string()
+    .refine((v) => v === "" || z.string().url().safeParse(v).success, {
+      message: "Must be a valid URL (include https://)",
+    })
+    .optional(),
   whatsapp: z.string().optional(),
 });
+
 type ProviderForm = z.infer<typeof providerSchema>;
 
 export default function ProfilePage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!isAuthenticated) { router.push("/login"); return; }
-    setLoading(false);
-  }, [isAuthenticated, router]);
-
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors },
   } = useForm<ProviderForm>({ resolver: zodResolver(providerSchema) });
+
+  useEffect(() => {
+    if (!_hasHydrated) return;
+    if (!isAuthenticated) {
+      router.push("/login");
+      return;
+    }
+
+    if (user?.role === "provider") {
+      api.providers.getMyData(token!).then((res) => {
+        const p = res.provider_data;
+        reset({
+          service_name: p.service_name ?? "",
+          service_description: p.service_description ?? "",
+          location: p.location ?? "",
+          phone_number: p.phone_number ?? "",
+          email: p.email ?? "",
+          website: p.website ?? "",
+          whatsapp: p.whatsapp ?? "",
+        });
+      }).catch((err: unknown) => {
+        if (err instanceof Error && !err.message.includes("not found")) {
+          toast.error("Could not load profile data");
+        }
+      }).finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [_hasHydrated, isAuthenticated, router, token, user?.role, reset]);
 
   async function onSubmit(data: ProviderForm) {
     if (!user) return;
@@ -116,10 +162,16 @@ export default function ProfilePage() {
               <div className="space-y-1.5">
                 <Label>Service name</Label>
                 <Input placeholder="Your trading name" {...register("service_name")} />
+                {errors.service_name && (
+                  <p className="text-xs text-destructive">{errors.service_name.message}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>About your services</Label>
                 <Textarea rows={3} placeholder="What you do…" {...register("service_description")} />
+                {errors.service_description && (
+                  <p className="text-xs text-destructive">{errors.service_description.message}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -133,13 +185,18 @@ export default function ProfilePage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Email</Label>
-                <Input type="email" {...register("email")} />
-                {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+                <Input type="email" placeholder="you@example.com" {...register("email")} />
+                {errors.email && (
+                  <p className="text-xs text-destructive">{errors.email.message}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>Website</Label>
                   <Input placeholder="https://…" {...register("website")} />
+                  {errors.website && (
+                    <p className="text-xs text-destructive">{errors.website.message}</p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label>WhatsApp</Label>
@@ -154,10 +211,10 @@ export default function ProfilePage() {
         </Card>
       )}
 
-      {/* Danger zone */}
+      {/* Account actions */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base text-destructive">Account</CardTitle>
+          <CardTitle className="text-base">Account</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Separator />

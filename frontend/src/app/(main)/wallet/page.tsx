@@ -16,7 +16,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 
 export default function WalletPage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -29,11 +29,12 @@ export default function WalletPage() {
   const targetType = user?.role === "business" ? "business" : "provider";
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     if (!isAuthenticated) { router.push("/login"); return; }
     if (user?.role === "client") { router.push("/dashboard"); return; }
     loadWallet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, user]);
+  }, [_hasHydrated, isAuthenticated, user]);
 
   async function loadWallet() {
     try {

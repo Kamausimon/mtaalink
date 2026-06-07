@@ -146,6 +146,7 @@ pub async fn list_providers(
 #[derive(Serialize, Debug, sqlx::FromRow)]
 struct ProviderPublicProfile {
     id: i32,
+    user_id: i32,
     service_name: Option<String>,
     service_description: Option<String>,
     category: Option<String>,
@@ -165,7 +166,7 @@ pub async fn get_provider_public_profile(
     Path(id): Path<i32>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let profile = sqlx::query_as::<_, ProviderPublicProfile>(
-        r#"SELECT p.id, p.service_name, p.service_description, p.category, p.location,
+        r#"SELECT p.id, p.user_id, p.service_name, p.service_description, p.category, p.location,
                   p.email, p.phone_number, p.website, p.whatsapp,
                   p.profile_photo, p.cover_photo,
                   ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
@@ -353,22 +354,10 @@ pub struct ProviderData {
     whatsapp: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct GetProviderDataQuery {
-    pub provider_id: i32,
-}
-
 pub async fn get_provider_data(
     State(pool): State<PgPool>,
     CurrentUser { user_id }: CurrentUser,
-    Query(params): Query<GetProviderDataQuery>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    if params.provider_id != user_id {
-        return Err(AppError::Forbidden(
-            "You are not authorized to access this data".to_string(),
-        ));
-    }
-
     let provider = sqlx::query_as!(
         ProviderData,
         "SELECT id, service_name, service_description, category, location, \

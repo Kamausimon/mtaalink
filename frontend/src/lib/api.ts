@@ -22,8 +22,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(res.status, err.error ?? "Something went wrong");
+    const err = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, err.message ?? err.error ?? res.statusText ?? "Something went wrong");
   }
 
   return res.json() as Promise<T>;
@@ -41,9 +41,17 @@ export class ApiError extends Error {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
+// Raw flat shape the backend returns for auth endpoints
+type RawAuthResponse = {
+  token: string;
+  user_id: number;
+  username: string;
+  role: string;
+};
+
 export const api = {
   auth: {
-    register: (data: {
+    register: async (data: {
       username: string;
       email: string;
       password: string;
@@ -51,10 +59,21 @@ export const api = {
       role: string;
       service_description?: string;
       business_name?: string;
-    }) => request<{ token: string; user: User }>("/auth/register", { method: "POST", body: data }),
+    }): Promise<{ token: string; user: User }> => {
+      const raw = await request<RawAuthResponse>("/auth/register", { method: "POST", body: data });
+      return {
+        token: raw.token,
+        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"] },
+      };
+    },
 
-    login: (data: { email: string; password: string }) =>
-      request<{ token: string; user: User }>("/auth/login", { method: "POST", body: data }),
+    login: async (data: { email: string; password: string }): Promise<{ token: string; user: User }> => {
+      const raw = await request<RawAuthResponse>("/auth/login", { method: "POST", body: data });
+      return {
+        token: raw.token,
+        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"] },
+      };
+    },
 
     me: (token: string) => request<{ user: User }>("/auth/me", { token }),
 
@@ -72,7 +91,7 @@ export const api = {
 
   // ── Search ──────────────────────────────────────────────────────────────
   search: {
-    query: (params: SearchParams) => {
+    query: async (params: SearchParams): Promise<SearchResults> => {
       const qs = new URLSearchParams();
       if (params.q) qs.set("q", params.q);
       if (params.category) qs.set("category", params.category);
@@ -81,7 +100,40 @@ export const api = {
       if (params.radius_km) qs.set("radius_km", String(params.radius_km));
       if (params.page) qs.set("page", String(params.page));
       if (params.per_page) qs.set("per_page", String(params.per_page));
-      return request<SearchResults>(`/search?${qs}`);
+
+      // Backend returns separate providers/businesses arrays with different
+      // field names (average_rating, service_name, business_name). Transform
+      // them into the unified SearchResult shape the UI consumes.
+      const raw = await request<RawSearchResponse>(`/search?${qs}`);
+
+      const results: SearchResult[] = [
+        ...(raw.providers ?? []).map((p) => ({
+          id: p.id,
+          type: "provider" as const,
+          name: p.service_name ?? "Provider",
+          description: p.service_description,
+          category: p.category,
+          location: p.location,
+          profile_photo: p.profile_photo,
+          avg_rating: p.average_rating,
+          review_count: p.review_count,
+          distance_km: p.distance_km,
+        })),
+        ...(raw.businesses ?? []).map((b) => ({
+          id: b.id,
+          type: "business" as const,
+          name: b.business_name,
+          description: b.description,
+          category: b.category,
+          location: b.location,
+          profile_photo: b.profile_photo ?? b.logo,
+          avg_rating: b.average_rating,
+          review_count: b.review_count,
+          distance_km: b.distance_km,
+        })),
+      ];
+
+      return { results, total: raw.total };
     },
   },
 
@@ -100,9 +152,15 @@ export const api = {
     updateProfile: (data: Partial<ProviderOnboardInput>, token: string) =>
       request("/service_providers/updateProfile", { method: "POST", body: data, token }),
     getMyData: (token: string) =>
-      request<{ provider_data: ProviderProfile }>("/service_providers/getProviderData?provider_id=0", { token }),
+      request<{ provider_data: ProviderProfile }>("/service_providers/getProviderData", { token }),
     availability: {
-      get: (id: number) => request<{ availability: Availability[] }>(`/availability/provider/${id}`),
+      get: (id: number) =>
+        request<{ schedule: Availability[] }>(`/availability/provider/${id}`),
+      set: (
+        id: number,
+        schedule: Array<{ day: string; is_available: boolean; start_time?: string; end_time?: string }>,
+        token: string,
+      ) => request(`/availability/provider/${id}`, { method: "PUT", body: schedule, token }),
       slots: (id: number, date: string, slotMinutes = 60) =>
         request<{ slots: string[] }>(`/availability/provider/${id}/slots?date=${date}&slot_minutes=${slotMinutes}`),
     },
@@ -132,12 +190,12 @@ export const api = {
       if (params?.target_type) qs.set("target_type", params.target_type);
       return request<{ bookings: Booking[] }>(`/bookings/getBookings/me?${qs}`, { token });
     },
-    received: (token: string, params: { target_type: string; target_id: number; status: string }) => {
+    received: (token: string, params: { target_type: string; target_id: number; status?: string }) => {
       const qs = new URLSearchParams({
         target_type: params.target_type,
         target_id: String(params.target_id),
-        status: params.status,
       });
+      if (params.status && params.status !== "all") qs.set("status", params.status);
       return request<{ bookings: BookingReceived[] }>(`/bookings/getBookings/received?${qs}`, { token });
     },
     getById: (id: number, token: string) =>
@@ -302,8 +360,43 @@ export type SearchResult = {
 
 export type SearchResults = { results: SearchResult[]; total: number };
 
+// Raw shape returned by the backend /search endpoint before transformation
+type RawProviderResult = {
+  id: number;
+  service_name?: string;
+  service_description?: string;
+  category?: string;
+  location?: string;
+  profile_photo?: string;
+  average_rating: number;
+  review_count: number;
+  distance_km?: number;
+};
+
+type RawBusinessResult = {
+  id: number;
+  business_name: string;
+  description?: string;
+  category?: string;
+  location?: string;
+  profile_photo?: string;
+  logo?: string;
+  average_rating: number;
+  review_count: number;
+  distance_km?: number;
+};
+
+type RawSearchResponse = {
+  providers: RawProviderResult[];
+  businesses: RawBusinessResult[];
+  total: number;
+  page: number;
+  per_page: number;
+};
+
 export type PublicProvider = {
   id: number;
+  user_id?: number;
   service_name: string;
   category?: string;
   location?: string;

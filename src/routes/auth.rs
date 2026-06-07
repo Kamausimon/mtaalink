@@ -13,8 +13,6 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use std::sync::Arc;
-use tower_governor::{GovernorLayer, errors::GovernorError, governor::GovernorConfigBuilder};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use std::env;
@@ -24,30 +22,10 @@ use uuid::Uuid;
 use validator::Validate;
 
 pub fn auth_routes(pool: PgPool) -> Router {
-    // Strict: 5 requests per minute per IP (burst 5, then 1 per 12 s)
-    let strict_conf = {
-        let mut b = GovernorConfigBuilder::default();
-        b.per_second(12);
-        b.burst_size(5);
-        b.error_handler(|_: GovernorError| {
-            (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({ "message": "Too many requests. Please slow down." })),
-            )
-                .into_response()
-        });
-        Arc::new(b.finish().expect("valid rate limit config"))
-    };
-
-    // Routes that need the strict limit get their own nested router
-    let sensitive = Router::new()
+    Router::new()
         .route("/register", post(register))
         .route("/login", post(login_handler))
         .route("/forgot-password", post(forgot_password))
-        .layer(GovernorLayer { config: strict_conf });
-
-    Router::new()
-        .merge(sensitive)
         .route("/me", get(me))
         .route("/reset-password", post(reset_password))
         .with_state(pool)

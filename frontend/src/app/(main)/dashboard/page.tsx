@@ -19,12 +19,13 @@ import {
 import Link from "next/link";
 
 export default function DashboardPage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!_hasHydrated) return;
     if (!isAuthenticated) {
       router.push("/login");
       return;
@@ -34,7 +35,7 @@ export default function DashboardPage() {
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [isAuthenticated, token, router]);
+  }, [_hasHydrated, isAuthenticated, token, router]);
 
   if (loading) {
     return (
