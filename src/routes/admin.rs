@@ -524,3 +524,88 @@ pub async fn platform_dashboard(
         })),
     ))
 }
+
+// ── Disputes ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, sqlx::FromRow, Debug)]
+pub struct DisputeRow {
+    pub booking_id: i32,
+    pub client_id: i32,
+    pub client_username: String,
+    pub target_type: String,
+    pub target_id: i32,
+    pub provider_name: Option<String>,
+    pub service_description: Option<String>,
+    pub scheduled_time: chrono::NaiveDateTime,
+    pub dispute_reason: Option<String>,
+    pub admin_resolution: Option<String>,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+pub async fn list_disputes(
+    State(pool): State<PgPool>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let disputes = sqlx::query_as!(
+        DisputeRow,
+        r#"SELECT
+               b.id                 AS booking_id,
+               b.client_id,
+               u.username           AS client_username,
+               b.target_type,
+               b.target_id,
+               COALESCE(p.service_name, biz.business_name) AS provider_name,
+               b.service_description,
+               b.scheduled_time,
+               b.dispute_reason,
+               b.admin_resolution,
+               b.created_at
+           FROM bookings b
+           JOIN users u ON u.id = b.client_id
+           LEFT JOIN providers   p   ON b.target_type = 'provider' AND b.target_id = p.id
+           LEFT JOIN businesses  biz ON b.target_type = 'business' AND b.target_id = biz.id
+           WHERE b.status = 'disputed'
+           ORDER BY b.created_at DESC"#
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({ "disputes": disputes }))))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ResolveDisputePayload {
+    pub resolution: String,
+    pub note: Option<String>,
+}
+
+pub async fn resolve_dispute(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    Json(payload): Json<ResolveDisputePayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let resolution = payload.resolution.to_lowercase();
+    if resolution != "completed" && resolution != "cancelled" {
+        return Err(AppError::BadRequest(
+            "Resolution must be 'completed' or 'cancelled'".to_string(),
+        ));
+    }
+
+    let updated = sqlx::query!(
+        r#"UPDATE bookings
+           SET status = $1, admin_resolution = $2, updated_at = NOW()
+           WHERE id = $3 AND status = 'disputed'"#,
+        resolution,
+        payload.note.as_deref(),
+        id
+    )
+    .execute(&pool)
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound(
+            "Disputed booking not found or already resolved".to_string(),
+        ));
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": format!("Booking marked as {resolution}") }))))
+}
