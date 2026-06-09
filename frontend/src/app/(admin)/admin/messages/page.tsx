@@ -12,11 +12,13 @@ import { MessageCircle, Send, ChevronLeft } from "lucide-react";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878";
-
 function isImageUrl(content: string) {
-  return content.startsWith("/uploads/") &&
-    /\.(jpg|jpeg|png|webp|heic|gif)$/i.test(content);
+  return content.startsWith("https://res.cloudinary.com/") ||
+    (content.startsWith("/uploads/") && /\.(jpg|jpeg|png|webp|heic|gif)$/i.test(content));
+}
+
+function resolveUrl(content: string) {
+  return content.startsWith("http") ? content : `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878"}${content}`;
 }
 
 function fmtTime(iso: string) {
@@ -224,9 +226,9 @@ export default function AdminMessagesPage() {
                             : "bg-muted text-foreground rounded-bl-sm"),
                     )}>
                       {isImg ? (
-                        <a href={`${BASE_URL}${msg.content}`} target="_blank" rel="noreferrer">
+                        <a href={resolveUrl(msg.content)} target="_blank" rel="noreferrer">
                           <img
-                            src={`${BASE_URL}${msg.content}`}
+                            src={resolveUrl(msg.content)}
                             alt="shared image"
                             className="rounded-xl max-w-60 max-h-72 object-cover border border-border hover:opacity-90 transition-opacity"
                           />

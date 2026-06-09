@@ -18,6 +18,11 @@ import { Gavel, CheckCircle2, XCircle, User, CalendarDays, MessageCircle, AlertT
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878";
+function resolveUrl(url: string) {
+  return url.startsWith("http") ? url : `${API_URL}${url}`;
+}
+
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   try { return format(parseISO(iso), "d MMM yyyy, HH:mm"); } catch { return iso; }
@@ -281,9 +286,9 @@ export default function AdminDisputesPage() {
                         <p className="text-xs font-semibold text-red-700">From client:</p>
                         <div className="flex gap-2 flex-wrap">
                           {evidence[d.booking_id].filter(e => e.uploader_role === "client").map((ev) => (
-                            <a key={ev.id} href={`http://localhost:7878${ev.file_url}`} target="_blank" rel="noreferrer" className="group relative">
+                            <a key={ev.id} href={resolveUrl(ev.file_url)} target="_blank" rel="noreferrer" className="group relative">
                               <img
-                                src={`http://localhost:7878${ev.file_url}`}
+                                src={resolveUrl(ev.file_url)}
                                 alt={ev.caption ?? "evidence"}
                                 className="h-24 w-24 object-cover rounded-lg border-2 border-red-200 hover:border-red-400 transition-colors"
                               />
@@ -301,9 +306,9 @@ export default function AdminDisputesPage() {
                         <p className="text-xs font-semibold text-blue-700">From provider:</p>
                         <div className="flex gap-2 flex-wrap">
                           {evidence[d.booking_id].filter(e => e.uploader_role === "provider").map((ev) => (
-                            <a key={ev.id} href={`http://localhost:7878${ev.file_url}`} target="_blank" rel="noreferrer" className="group relative">
+                            <a key={ev.id} href={resolveUrl(ev.file_url)} target="_blank" rel="noreferrer" className="group relative">
                               <img
-                                src={`http://localhost:7878${ev.file_url}`}
+                                src={resolveUrl(ev.file_url)}
                                 alt={ev.caption ?? "evidence"}
                                 className="h-24 w-24 object-cover rounded-lg border-2 border-blue-200 hover:border-blue-400 transition-colors"
                               />

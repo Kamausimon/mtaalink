@@ -33,6 +33,7 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/disputes/:id/resolve", post(resolve_dispute))
         .route("/suspend/:entity_type/:entity_id", post(suspend_entity))
         .route("/unsuspend/:entity_type/:entity_id", post(unsuspend_entity))
+        .route("/approve/:entity_type/:entity_id", post(approve_entity))
         .route("/dashboard", get(platform_dashboard))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
@@ -150,12 +151,16 @@ pub async fn delete_category(
     Ok((StatusCode::OK, Json(json!({ "message": "Category deleted successfully" }))))
 }
 
-#[derive(Serialize, Deserialize, sqlx::FromRow, Debug)]
+#[derive(Serialize, sqlx::FromRow, Debug)]
 pub struct User {
     pub id: i32,
     pub username: String,
     pub email: String,
     pub role: Option<String>,
+    pub provider_id: Option<i32>,
+    pub provider_approved: Option<bool>,
+    pub business_id: Option<i32>,
+    pub business_verified: Option<bool>,
 }
 
 pub async fn get_users(
@@ -163,7 +168,13 @@ pub async fn get_users(
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let users = sqlx::query_as!(
         User,
-        "SELECT id, username, email, role FROM users ORDER BY id DESC"
+        r#"SELECT u.id, u.username, u.email, u.role,
+                  p.id AS provider_id, p.approved AS provider_approved,
+                  b.id AS business_id, b.verified AS business_verified
+           FROM users u
+           LEFT JOIN providers   p ON p.user_id = u.id
+           LEFT JOIN businesses  b ON b.user_id = u.id
+           ORDER BY u.id DESC"#
     )
     .fetch_all(&pool)
     .await?;
@@ -770,4 +781,68 @@ pub async fn unsuspend_entity(
     }
 
     Ok((StatusCode::OK, Json(json!({ "message": "Suspension lifted" }))))
+}
+
+// ── Approve provider / verify business ───────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
+pub struct ApprovePayload {
+    pub approved: bool,
+}
+
+pub async fn approve_entity(
+    State(pool): State<PgPool>,
+    Path((entity_type, entity_id)): Path<(String, i32)>,
+    Json(payload): Json<ApprovePayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    match entity_type.as_str() {
+        "provider" => {
+            let updated = sqlx::query!(
+                "UPDATE providers SET approved = $1 WHERE id = $2",
+                payload.approved, entity_id
+            )
+            .execute(&pool)
+            .await?;
+            if updated.rows_affected() == 0 {
+                return Err(AppError::NotFound("Provider not found".to_string()));
+            }
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM providers WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                let title = if payload.approved { "Account approved" } else { "Approval revoked" };
+                let body = if payload.approved {
+                    "Your provider account has been approved. You can now receive bookings on MtaaLink."
+                } else {
+                    "Your provider account approval has been revoked by an admin."
+                };
+                notify_best_effort(&pool, user_id, "account_approved", title, body, Some("provider"), Some(entity_id)).await;
+            }
+        }
+        "business" => {
+            let updated = sqlx::query!(
+                "UPDATE businesses SET verified = $1 WHERE id = $2",
+                payload.approved, entity_id
+            )
+            .execute(&pool)
+            .await?;
+            if updated.rows_affected() == 0 {
+                return Err(AppError::NotFound("Business not found".to_string()));
+            }
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM businesses WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                let title = if payload.approved { "Business verified" } else { "Verification revoked" };
+                let body = if payload.approved {
+                    "Your business has been verified on MtaaLink. A verified badge will now appear on your profile."
+                } else {
+                    "Your business verification has been revoked by an admin."
+                };
+                notify_best_effort(&pool, user_id, "account_approved", title, body, Some("business"), Some(entity_id)).await;
+            }
+        }
+        _ => return Err(AppError::BadRequest("entity_type must be 'provider' or 'business'".to_string())),
+    }
+
+    let status = if payload.approved { "approved" } else { "revoked" };
+    Ok((StatusCode::OK, Json(json!({ "message": format!("{} {}", entity_type, status) }))))
 }
