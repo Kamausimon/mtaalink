@@ -14,8 +14,6 @@ import { format, isToday, isThisYear } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878";
-
 function formatConvTime(iso: string) {
   const d = new Date(iso);
   if (isToday(d)) return format(d, "h:mm a");
@@ -24,8 +22,8 @@ function formatConvTime(iso: string) {
 }
 
 function isImageUrl(content: string) {
-  return content.startsWith("/uploads/messages/") &&
-    /\.(jpg|jpeg|png|webp|heic|gif)$/i.test(content);
+  return content.startsWith("https://res.cloudinary.com/") ||
+    (content.startsWith("/uploads/") && /\.(jpg|jpeg|png|webp|heic|gif)$/i.test(content));
 }
 
 type WsMessage = {
@@ -208,7 +206,7 @@ export default function MessagesPage() {
         const optimId = appendOptimistic(pendingImage.preview); // temporary local preview
         removePendingImage();
         try {
-          const { url } = await api.messages.uploadAttachment(pendingImage?.file ?? ({} as File), token!);
+          const { url } = await api.messages.uploadAttachment(pendingImage?.file ?? ({} as File));
           // Replace temporary optimistic with real URL
           setMessages((prev) =>
             prev.map((m) =>
@@ -364,9 +362,9 @@ export default function MessagesPage() {
                         <div className={cn("max-w-xs", !isImg && !isLocalPreview && "px-3 py-2 rounded-2xl text-sm",
                           !isImg && !isLocalPreview && (isMe ? "bg-primary text-white rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"))}>
                           {isImg ? (
-                            <a href={`${BASE_URL}${msg.content}`} target="_blank" rel="noreferrer">
+                            <a href={msg.content.startsWith("http") ? msg.content : `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878"}${msg.content}`} target="_blank" rel="noreferrer">
                               <img
-                                src={`${BASE_URL}${msg.content}`}
+                                src={msg.content.startsWith("http") ? msg.content : `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878"}${msg.content}`}
                                 alt="shared image"
                                 className="rounded-xl max-w-60 max-h-75 object-cover border border-border"
                               />

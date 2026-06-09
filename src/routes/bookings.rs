@@ -29,6 +29,7 @@ pub fn booking_routes(pool: PgPool) -> Router {
         .route("/:id/dispute_response", post(submit_dispute_response))
         .route("/:id/evidence", post(upload_dispute_evidence))
         .route("/:id/evidence", get(get_dispute_evidence))
+        .route("/:id/evidence/url", post(record_dispute_evidence_url))
         .with_state(pool)
 }
 
@@ -813,6 +814,75 @@ pub async fn upload_dispute_evidence(
     .await?;
 
     Ok((StatusCode::CREATED, Json(json!({ "url": url, "message": "Evidence uploaded" }))))
+}
+
+// ── Record evidence by URL (Cloudinary upload done on frontend) ───────────────
+
+#[derive(Deserialize)]
+pub struct EvidenceUrlPayload {
+    pub file_url: String,
+    pub caption: Option<String>,
+}
+
+pub async fn record_dispute_evidence_url(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<EvidenceUrlPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let booking = sqlx::query!(
+        "SELECT target_type, target_id, client_id, status FROM bookings WHERE id = $1",
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
+
+    if booking.status != "disputed" {
+        return Err(AppError::BadRequest("Evidence can only be submitted for disputed bookings".to_string()));
+    }
+
+    let is_client = booking.client_id == user_id;
+    let target_type = booking.target_type.to_lowercase();
+    let is_service_owner = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !is_client && !is_service_owner {
+        return Err(AppError::Forbidden("Only the client or service provider can submit evidence".to_string()));
+    }
+
+    let uploader_role = if is_client { "client" } else { "provider" };
+
+    let count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM dispute_evidence WHERE booking_id = $1 AND uploaded_by = $2",
+        id, user_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .unwrap_or(0);
+
+    if count >= 5 {
+        return Err(AppError::BadRequest("Maximum 5 evidence images per party".to_string()));
+    }
+
+    sqlx::query!(
+        r#"INSERT INTO dispute_evidence (booking_id, uploaded_by, uploader_role, file_url, caption)
+           VALUES ($1, $2, $3, $4, $5)"#,
+        id, user_id, uploader_role, payload.file_url, payload.caption.as_deref()
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "url": payload.file_url, "message": "Evidence recorded" }))))
 }
 
 pub async fn get_dispute_evidence(

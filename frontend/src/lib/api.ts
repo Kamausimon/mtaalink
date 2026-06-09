@@ -217,19 +217,13 @@ export const api = {
     submitDisputeResponse: (id: number, response: string, token: string) =>
       request(`/bookings/${id}/dispute_response`, { method: "POST", body: { response }, token }),
     uploadEvidence: async (id: number, file: File, caption: string, token: string): Promise<{ url: string }> => {
-      const form = new FormData();
-      form.append("file", file);
-      if (caption.trim()) form.append("caption", caption.trim());
-      const res = await fetch(`${BASE_URL}/bookings/${id}/evidence`, {
+      const { uploadToCloudinary } = await import("./cloudinary");
+      const url = await uploadToCloudinary(file);
+      return request(`/bookings/${id}/evidence/url`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
+        body: { file_url: url, caption: caption.trim() || null },
+        token,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new ApiError(res.status, err.message ?? "Upload failed");
-      }
-      return res.json();
     },
     getEvidence: (id: number, token: string) =>
       request<{ evidence: DisputeEvidence[] }>(`/bookings/${id}/evidence`, { token }),
@@ -286,19 +280,10 @@ export const api = {
       request<{ unread_count: number }>("/messages/unreadMessagesCount", { token }),
     markRead: (messageIds: number[], token: string) =>
       request("/messages/markMessagesAsRead", { method: "POST", body: { message_ids: messageIds }, token }),
-    uploadAttachment: async (file: File, token: string): Promise<{ url: string }> => {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(`${BASE_URL}/messages/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new ApiError(res.status, err.message ?? "Upload failed");
-      }
-      return res.json();
+    uploadAttachment: async (file: File): Promise<{ url: string }> => {
+      const { uploadToCloudinary } = await import("./cloudinary");
+      const url = await uploadToCloudinary(file);
+      return { url };
     },
   },
 
@@ -424,6 +409,8 @@ export const api = {
       request(`/admin/suspend/${entityType}/${entityId}`, { method: "POST", body: { days }, token }),
     unsuspend: (entityType: "provider" | "business", entityId: number, token: string) =>
       request(`/admin/unsuspend/${entityType}/${entityId}`, { method: "POST", token }),
+    approve: (entityType: "provider" | "business", entityId: number, approved: boolean, token: string) =>
+      request(`/admin/approve/${entityType}/${entityId}`, { method: "POST", body: { approved }, token }),
   },
 };
 
