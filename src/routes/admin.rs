@@ -27,6 +27,8 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/payouts", get(list_pending_payouts))
         .route("/payouts/:id/approve", post(approve_payout))
         .route("/payouts/:id/reject", post(reject_payout))
+        .route("/disputes", get(list_disputes))
+        .route("/disputes/:id/resolve", post(resolve_dispute))
         .route("/dashboard", get(platform_dashboard))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)

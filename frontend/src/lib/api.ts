@@ -263,6 +263,8 @@ export const api = {
     ) => request("/messages/sendMessage", { method: "POST", body: data, token }),
     unreadCount: (token: string) =>
       request<{ unread_count: number }>("/messages/unreadMessagesCount", { token }),
+    markRead: (messageIds: number[], token: string) =>
+      request("/messages/markMessagesAsRead", { method: "POST", body: { message_ids: messageIds }, token }),
   },
 
   // ── Notifications ────────────────────────────────────────────────────────
@@ -292,6 +294,12 @@ export const api = {
       request("/services/updateService", { method: "POST", body: data, token }),
     delete: (serviceId: number, token: string) =>
       request("/services/deleteService", { method: "POST", body: { service_id: serviceId }, token }),
+  },
+
+  // ── Analytics ───────────────────────────────────────────────────────────
+  analytics: {
+    get: (targetType: string, targetId: number, days: number, token: string) =>
+      request<AnalyticsData>(`/analytics/${targetType}/${targetId}?days=${days}`, { token }),
   },
 
   // ── Wallet ──────────────────────────────────────────────────────────────
@@ -346,6 +354,33 @@ export const api = {
       request(`/posts/${id}/comments`, { method: "POST", body: { comment }, token }),
     deleteComment: (postId: number, commentId: number, token: string) =>
       request(`/posts/${postId}/comments/${commentId}`, { method: "DELETE", token }),
+  },
+
+  admin: {
+    dashboard: (token: string) =>
+      request<AdminDashboardStats>("/admin/dashboard", { token }),
+    users: (token: string) =>
+      request<{ users: AdminUser[] }>("/admin/users", { token }),
+    deleteUser: (userId: number, token: string) =>
+      request("/admin/delete_user", { method: "POST", body: { user_id: userId }, token }),
+    userAnalytics: (token: string) =>
+      request<AdminUserAnalytics>("/admin/userAnalytics", { token }),
+    payouts: (token: string) =>
+      request<{ pending_payouts: AdminPayout[] }>("/admin/payouts", { token }),
+    approvePayout: (id: number, notes: string | null, token: string) =>
+      request(`/admin/payouts/${id}/approve`, { method: "POST", body: { notes }, token }),
+    rejectPayout: (id: number, notes: string | null, token: string) =>
+      request(`/admin/payouts/${id}/reject`, { method: "POST", body: { notes }, token }),
+    categories: (token: string) =>
+      request<{ categories: Category[] }>("/admin/categories", { token }),
+    createCategory: (name: string, parentId: number | null, token: string) =>
+      request("/admin/create_category", { method: "POST", body: { name, parent_id: parentId }, token }),
+    deleteCategory: (categoryId: number, token: string) =>
+      request("/admin/delete_category", { method: "POST", body: { category_id: categoryId }, token }),
+    flaggedReviews: (token: string) =>
+      request<{ flagged_reviews: FlaggedReview[] }>("/admin/moderateReviews", { token }),
+    resolveFlag: (flagId: number, token: string) =>
+      request("/admin/resolveFlag", { method: "POST", body: { flag_id: flagId }, token }),
   },
 };
 
@@ -588,6 +623,7 @@ export type Message = {
   receiver_id: number;
   content: string;
   created_at: string;
+  is_read: boolean;
   read_at?: string;
 };
 
@@ -610,6 +646,24 @@ export type Notification = {
   target_id?: number;
   is_read: boolean;
   created_at: string;
+};
+
+export type AnalyticsData = {
+  period_days: number;
+  overview: {
+    total_bookings: number;
+    pending: number;
+    confirmed: number;
+    completed: number;
+    cancelled: number;
+    total_revenue: number;
+    average_rating: number;
+    review_count: number;
+  };
+  bookings_over_time: { date: string; count: number }[];
+  revenue_over_time: { date: string; amount: number }[];
+  top_services: { service_name: string | null; booking_count: number; revenue: number }[];
+  repeat_clients: { total_clients: number; repeat_clients: number; repeat_rate: number };
 };
 
 export type Wallet = {
@@ -676,4 +730,47 @@ export type PostComment = {
   username: string;
   comment: string;
   created_at: string;
+};
+
+// ── Admin types ───────────────────────────────────────────────────────────────
+
+export type AdminDashboardStats = {
+  users: { clients: number; providers: number; businesses: number; total: number };
+  bookings: { total: number; pending: number; confirmed: number; completed: number; cancelled: number };
+  revenue: { total_collected: number; pending_payments: number };
+  payouts: { pending_amount: number; approved_amount: number };
+};
+
+export type AdminUser = {
+  id: number;
+  username: string;
+  email: string;
+  role: string | null;
+};
+
+export type AdminPayout = {
+  id: number;
+  wallet_id: number;
+  amount: string;
+  phone_number: string;
+  status: string;
+  notes: string | null;
+  target_type: string | null;
+  target_id: number | null;
+};
+
+export type FlaggedReview = {
+  review_id: number;
+  reviewer_id: number;
+  target_type: string;
+  target_id: number;
+  rating: number;
+  comment: string | null;
+  flag_count: number;
+};
+
+export type AdminUserAnalytics = {
+  users: { clients: number; providers: number; businesses: number; total: number };
+  bookings: { pending: number; confirmed: number; completed: number; cancelled: number };
+  signups_last_7_days: { day: string; count: number }[];
 };

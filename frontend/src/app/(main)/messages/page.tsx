@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { api, type Conversation, type Message } from "@/lib/api";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,15 @@ function formatConvTime(iso: string) {
   return format(d, "d MMM yyyy");
 }
 
+type WsMessage = {
+  id: number;
+  sender_id: number;
+  content: string;
+  target_type: string;
+  target_id: number;
+  created_at: string;
+};
+
 export default function MessagesPage() {
   const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
@@ -30,13 +40,16 @@ export default function MessagesPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<Conversation | null>(null);
+
+  // Keep ref in sync so WS handler always sees current conversation
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
 
   useEffect(() => {
     if (!_hasHydrated) return;
-    if (!isAuthenticated) {
-      router.push("/login");
-      return;
-    }
+    if (!isAuthenticated) { router.push("/login"); return; }
     api.messages
       .conversations(token!)
       .then((r) => setConversations(r.conversations))
@@ -52,38 +65,134 @@ export default function MessagesPage() {
         target_type: selected.target_type,
         target_id: selected.target_id,
       })
-      .then((r) => setMessages(r.messages))
+      .then((r) => {
+        setMessages(r.messages);
+        // Mark all unread messages sent TO us as read
+        const unreadIds = r.messages
+          .filter((m) => !m.is_read && m.sender_id !== user?.id)
+          .map((m) => m.id);
+        if (unreadIds.length > 0) {
+          api.messages.markRead(unreadIds, token!).catch(() => {});
+        }
+      })
       .catch(() => {});
-  }, [selected, token]);
+  }, [selected, token, user?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // WebSocket — real-time incoming messages
+  useWebSocket(token ?? null, {
+    new_message: (raw) => {
+      const msg = raw as WsMessage;
+      const cur = selectedRef.current;
+      const isCurrentThread =
+        cur &&
+        cur.other_user_id === msg.sender_id &&
+        cur.target_type === msg.target_type &&
+        cur.target_id === msg.target_id;
+
+      // Append to open thread and mark as read immediately
+      if (isCurrentThread) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: msg.id,
+            sender_id: msg.sender_id,
+            receiver_id: user!.id,
+            content: msg.content,
+            created_at: msg.created_at,
+            is_read: true,
+          },
+        ]);
+        api.messages.markRead([msg.id], token!).catch(() => {});
+      }
+
+      // Update conversation list
+      setConversations((prev) => {
+        const exists = prev.find(
+          (c) =>
+            c.other_user_id === msg.sender_id &&
+            c.target_type === msg.target_type &&
+            c.target_id === msg.target_id,
+        );
+        if (exists) {
+          return prev.map((c) =>
+            c.other_user_id === msg.sender_id &&
+            c.target_type === msg.target_type &&
+            c.target_id === msg.target_id
+              ? {
+                  ...c,
+                  last_message: msg.content,
+                  last_message_at: msg.created_at,
+                  unread_count: isCurrentThread ? 0 : c.unread_count + 1,
+                }
+              : c,
+          );
+        }
+        // New conversation — reload list
+        api.messages.conversations(token!).then((r) => setConversations(r.conversations)).catch(() => {});
+        return prev;
+      });
+    },
+  });
+
+  async function selectConversation(conv: Conversation) {
+    setSelected(conv);
+    // Mark unread count as 0 in list immediately
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.other_user_id === conv.other_user_id &&
+        c.target_type === conv.target_type &&
+        c.target_id === conv.target_id
+          ? { ...c, unread_count: 0 }
+          : c,
+      ),
+    );
+  }
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
-    if (!msgInput.trim() || !selected) return;
+    const text = msgInput.trim();
+    if (!text || !selected || sending) return;
+
+    const optimistic: Message = {
+      id: Date.now(),
+      sender_id: user!.id,
+      receiver_id: selected.other_user_id,
+      content: text,
+      created_at: new Date().toISOString(),
+      is_read: false,
+    };
+
+    setMsgInput("");
+    setMessages((prev) => [...prev, optimistic]);
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.other_user_id === selected.other_user_id &&
+        c.target_type === selected.target_type &&
+        c.target_id === selected.target_id
+          ? { ...c, last_message: text, last_message_at: optimistic.created_at }
+          : c,
+      ),
+    );
+
     setSending(true);
     try {
       await api.messages.send(
         {
           receiver_id: selected.other_user_id,
-          content: msgInput.trim(),
+          content: text,
           target_type: selected.target_type,
           target_id: selected.target_id,
         },
         token!,
       );
-      setMsgInput("");
-      // Reload messages
-      const r = await api.messages.get(token!, {
-        other_user_id: selected.other_user_id,
-        target_type: selected.target_type,
-        target_id: selected.target_id,
-      });
-      setMessages(r.messages);
     } catch {
       toast.error("Failed to send message");
+      // Roll back optimistic message
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
     } finally {
       setSending(false);
     }
@@ -116,12 +225,14 @@ export default function MessagesPage() {
             ) : (
               conversations.map((conv) => {
                 const unread = conv.unread_count > 0;
-                const isSelected = selected?.other_user_id === conv.other_user_id && selected?.target_id === conv.target_id;
+                const isSelected =
+                  selected?.other_user_id === conv.other_user_id &&
+                  selected?.target_id === conv.target_id;
                 return (
                   <button
                     key={`${conv.other_user_id}-${conv.target_id}`}
                     type="button"
-                    onClick={() => setSelected(conv)}
+                    onClick={() => selectConversation(conv)}
                     className={cn(
                       "w-full text-left px-3 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors border-b border-border/50",
                       isSelected && "bg-primary/5 border-l-2 border-l-primary",
@@ -188,7 +299,9 @@ export default function MessagesPage() {
                   const isMe = msg.sender_id === user?.id;
                   const msgDate = new Date(msg.created_at);
                   const prevDate = i > 0 ? new Date(messages[i - 1].created_at) : null;
-                  const showDateSep = !prevDate || format(msgDate, "yyyy-MM-dd") !== format(prevDate, "yyyy-MM-dd");
+                  const showDateSep =
+                    !prevDate ||
+                    format(msgDate, "yyyy-MM-dd") !== format(prevDate, "yyyy-MM-dd");
                   return (
                     <div key={msg.id}>
                       {showDateSep && (
@@ -204,7 +317,9 @@ export default function MessagesPage() {
                         <div
                           className={cn(
                             "max-w-xs px-3 py-2 rounded-2xl text-sm",
-                            isMe ? "bg-primary text-white rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm",
+                            isMe
+                              ? "bg-primary text-white rounded-br-sm"
+                              : "bg-muted text-foreground rounded-bl-sm",
                           )}
                         >
                           <p>{msg.content}</p>
