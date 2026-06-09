@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Users, Wallet, Tag, ShieldAlert, LogOut, Menu, X,
+  LayoutDashboard, Users, Wallet, Tag, ShieldAlert, LogOut, Menu, Gavel, MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -14,6 +14,8 @@ const navItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/payouts", label: "Payouts", icon: Wallet },
+  { href: "/admin/disputes", label: "Disputes", icon: Gavel },
+  { href: "/admin/messages", label: "Messages", icon: MessageCircle },
   { href: "/admin/categories", label: "Categories", icon: Tag },
   { href: "/admin/moderation", label: "Moderation", icon: ShieldAlert },
 ];
