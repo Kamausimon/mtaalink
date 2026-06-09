@@ -18,7 +18,7 @@ fn jwt_secret() -> Vec<u8> {
 
 pub fn create_jwt(user_id: &str) -> AppResult<String> {
     let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::hours(24))
+        .checked_add_signed(chrono::Duration::days(30))
         .expect("valid timestamp")
         .timestamp() as usize;
 

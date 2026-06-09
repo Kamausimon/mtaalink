@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Wallet as WalletIcon, TrendingUp, ArrowDownCircle } from "lucide-react";
+import { Wallet as WalletIcon, TrendingUp, ArrowDownCircle, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
@@ -147,22 +147,37 @@ export default function WalletPage() {
             {transactions.length === 0 ? (
               <p className="text-sm text-muted-foreground px-5 py-6">No transactions yet.</p>
             ) : (
-              transactions.map((tx, i) => (
-                <div key={tx.id}>
-                  {i > 0 && <Separator />}
-                  <div className="flex items-center justify-between px-5 py-4">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{tx.description}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {format(new Date(tx.created_at), "d MMM yyyy, h:mm a")}
-                      </p>
+              transactions.map((tx, i) => {
+                const isCredit = tx.txn_type === "credit";
+                return (
+                  <div key={tx.id}>
+                    {i > 0 && <Separator />}
+                    <div className="flex items-center justify-between px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                          isCredit ? "bg-green-50" : "bg-red-50"
+                        }`}>
+                          {isCredit
+                            ? <ArrowDownLeft className="h-4 w-4 text-green-600" />
+                            : <ArrowUpRight className="h-4 w-4 text-red-500" />
+                          }
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{tx.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {format(new Date(tx.created_at), "d MMM yyyy, h:mm a")}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`text-sm font-semibold tabular-nums ${
+                        isCredit ? "text-green-600" : "text-red-500"
+                      }`}>
+                        {isCredit ? "+" : "−"} KES {Number(tx.amount).toLocaleString()}
+                      </span>
                     </div>
-                    <span className="text-sm font-semibold text-primary">
-                      + KES {Number(tx.amount).toLocaleString()}
-                    </span>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </CardContent>
         </Card>

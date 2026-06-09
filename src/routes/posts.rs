@@ -110,7 +110,7 @@ pub async fn create_posts(
             &pool, &ws_conns, uid,
             "new_post", "New Post",
             &format!("A provider you follow posted: {}", payload.title.trim()),
-            Some("post"), Some(post.id),
+            Some(target_type), Some(target_id),
         ).await;
     }
 
@@ -134,6 +134,7 @@ struct PostRow {
     pub updated_at: DateTime<Utc>,
     image_urls_csv: String,
     pub like_count: i64,
+    pub comment_count: Option<i64>,
 }
 
 impl PostRow {
@@ -153,6 +154,7 @@ impl PostRow {
             "updated_at": self.updated_at,
             "image_urls": image_urls,
             "like_count": self.like_count,
+            "comment_count": self.comment_count.unwrap_or(0),
         })
     }
 }
@@ -162,7 +164,8 @@ const POSTS_WITH_DETAILS_SQL: &str = r#"
         p.id, p.title, p.content, p.business_id, p.provider_id,
         p.created_at, p.updated_at,
         COALESCE(string_agg(DISTINCT a.file_path, ','), '') AS image_urls_csv,
-        COUNT(DISTINCT pl.user_id) AS like_count
+        COUNT(DISTINCT pl.user_id) AS like_count,
+        (SELECT COUNT(*) FROM post_comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     LEFT JOIN attachments a ON a.post_id = p.id
     LEFT JOIN post_likes pl ON pl.post_id = p.id
@@ -304,6 +307,9 @@ pub async fn update_post_and_attachments(
         return Err(AppError::Forbidden("You do not have permission to update this post".to_string()));
     }
 
+    let target_type = if post.provider_id.is_some() { "provider" } else { "business" };
+    let target_id = post.provider_id.or(post.business_id).unwrap_or(0);
+
     let mut tx = pool.begin().await?;
 
     sqlx::query!(
@@ -320,10 +326,16 @@ pub async fn update_post_and_attachments(
         .await?;
 
     for path in &payload.attachments {
+        let file_name = path.split('/').last().unwrap_or("image");
         sqlx::query!(
-            "INSERT INTO attachments (post_id, file_path, file_type) VALUES ($1, $2, 'image')",
+            r#"INSERT INTO attachments (post_id, file_name, file_path, file_type, target_type, target_id, uploaded_by)
+               VALUES ($1, $2, $3, 'image', $4, $5, $6)"#,
             id,
-            path
+            file_name,
+            path,
+            target_type,
+            target_id,
+            user_id
         )
         .execute(&mut *tx)
         .await?;
