@@ -1,4 +1,5 @@
 import Navbar from "@/components/Navbar";
+import EmailVerificationBanner from "@/components/EmailVerificationBanner";
 
 export default function MainLayout({
   children,
@@ -8,6 +9,7 @@ export default function MainLayout({
   return (
     <>
       <Navbar />
+      <EmailVerificationBanner />
       <main className="flex-1">{children}</main>
       <footer className="border-t border-border bg-white mt-auto">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">

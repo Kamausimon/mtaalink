@@ -122,6 +122,24 @@ pub async fn create_booking(
         ));
     }
 
+    // Block bookings to unapproved providers / unverified businesses
+    let is_unapproved = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT 1 FROM providers WHERE id = $1 AND approved = FALSE",
+            target_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT 1 FROM businesses WHERE id = $1 AND verified = FALSE",
+            target_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+    if is_unapproved {
+        return Err(AppError::BadRequest(
+            "This provider has not been approved yet and cannot accept bookings.".to_string(),
+        ));
+    }
+
     if payload.scheduled_time < chrono::Local::now().naive_local() {
         return Err(AppError::BadRequest("Scheduled time cannot be in the past".to_string()));
     }

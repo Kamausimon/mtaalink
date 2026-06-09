@@ -1,6 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::email::{EmailConfig, password_reset_html, send_email};
+use crate::utils::email::{EmailConfig, email_verification_html, password_reset_html, send_email};
 use crate::utils::jwt::create_jwt;
 use argon2::{
     Argon2, PasswordVerifier,
@@ -8,26 +8,38 @@ use argon2::{
 };
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use std::env;
+use std::{env, sync::Arc};
 use serde_json::json;
 use sqlx::PgPool;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use uuid::Uuid;
 use validator::Validate;
 
 pub fn auth_routes(pool: PgPool) -> Router {
+    let governor_config = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(8)
+            .finish()
+            .unwrap(),
+    );
+
     Router::new()
         .route("/register", post(register))
         .route("/login", post(login_handler))
         .route("/forgot-password", post(forgot_password))
         .route("/me", get(me))
         .route("/reset-password", post(reset_password))
+        .route("/verify-email", get(verify_email))
+        .route("/resend-verification", post(resend_verification))
+        .layer(GovernorLayer { config: governor_config })
         .with_state(pool)
 }
 
@@ -171,6 +183,26 @@ pub async fn register(
 
     tx.commit().await?;
 
+    // Send verification email in background (non-blocking — register still succeeds if email fails)
+    let verification_token = Uuid::new_v4().to_string();
+    let pool_clone = pool.clone();
+    let email_clone = payload.email.clone();
+    let token_clone = verification_token.clone();
+    tokio::spawn(async move {
+        let _ = sqlx::query!(
+            "INSERT INTO email_verification_tokens (user_id, token) VALUES ($1, $2)",
+            user_id, token_clone
+        )
+        .execute(&pool_clone)
+        .await;
+
+        if let Ok(cfg) = EmailConfig::from_env() {
+            let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+            let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+            let _ = send_email(&cfg, &email_clone, "Verify your MtaaLink email", &email_verification_html(&verify_url)).await;
+        }
+    });
+
     let token = create_jwt(&user_id.to_string())?;
 
     Ok((
@@ -181,8 +213,50 @@ pub async fn register(
             "username": payload.username,
             "role": payload.role,
             "token": token,
+            "email_verified": false,
         })),
     ))
+}
+
+// ── Email verification ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct VerifyEmailQuery {
+    pub token: String,
+}
+
+pub async fn verify_email(
+    State(pool): State<PgPool>,
+    Query(params): Query<VerifyEmailQuery>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let row = sqlx::query!(
+        r#"SELECT user_id, expires_at, used_at FROM email_verification_tokens WHERE token = $1"#,
+        params.token
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("Invalid verification token".to_string()))?;
+
+    if row.used_at.is_some() {
+        return Err(AppError::BadRequest("This verification link has already been used".to_string()));
+    }
+    if row.expires_at < Utc::now() {
+        return Err(AppError::BadRequest("Verification link has expired. Please request a new one.".to_string()));
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query!("UPDATE users SET email_verified = TRUE WHERE id = $1", row.user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(
+        "UPDATE email_verification_tokens SET used_at = NOW() WHERE token = $1",
+        params.token
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Email verified successfully" }))))
 }
 
 #[derive(Deserialize)]
@@ -198,7 +272,7 @@ pub async fn login_handler(
     payload.email = normalize_email(&payload.email);
 
     let user = sqlx::query!(
-        "SELECT id, username, password, role FROM users WHERE email = $1",
+        "SELECT id, username, password, role, email_verified FROM users WHERE email = $1",
         payload.email
     )
     .fetch_optional(&db)
@@ -221,6 +295,7 @@ pub async fn login_handler(
                     "user_id": user.id,
                     "username": user.username,
                     "role": user.role.unwrap_or_else(|| "unknown".to_string()),
+                    "email_verified": user.email_verified,
                 })),
             ));
         }
@@ -229,25 +304,15 @@ pub async fn login_handler(
     Err(AppError::Unauthorized("Invalid email or password".to_string()))
 }
 
-#[derive(Debug, sqlx::FromRow)]
-struct UserWithRole {
-    #[allow(dead_code)]
-    id: i32,
-    email: String,
-    username: String,
-    role: Option<String>,
-}
-
 pub async fn me(
     CurrentUser { user_id }: CurrentUser,
     State(pool): State<PgPool>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
-    let user = sqlx::query_as!(
-        UserWithRole,
+    let user = sqlx::query!(
         r#"SELECT
-          u.id,
           u.email,
           u.username,
+          u.email_verified,
           CASE
             WHEN c.id IS NOT NULL THEN 'client'
             WHEN p.id IS NOT NULL THEN 'provider'
@@ -272,6 +337,7 @@ pub async fn me(
                 "username": u.username,
                 "email": u.email,
                 "role": u.role.unwrap_or_else(|| "unknown".to_string()),
+                "email_verified": u.email_verified,
             })),
         )),
         None => Err(AppError::NotFound("User not found".to_string())),
@@ -385,4 +451,50 @@ pub async fn reset_password(
         StatusCode::OK,
         Json(json!({ "message": "Password reset successfully" })),
     ))
+}
+
+// ── Resend verification email ─────────────────────────────────────────────────
+
+pub async fn resend_verification(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let user = sqlx::query!("SELECT email, email_verified FROM users WHERE id = $1", user_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    if user.email_verified {
+        return Ok((StatusCode::OK, Json(json!({ "message": "Email already verified" }))));
+    }
+
+    // Delete any old unused tokens for this user
+    sqlx::query!(
+        "DELETE FROM email_verification_tokens WHERE user_id = $1 AND used_at IS NULL",
+        user_id
+    )
+    .execute(&pool)
+    .await?;
+
+    let token = Uuid::new_v4().to_string();
+    let email = user.email.clone();
+    let token_clone = token.clone();
+    let pool_clone = pool.clone();
+
+    tokio::spawn(async move {
+        let _ = sqlx::query!(
+            "INSERT INTO email_verification_tokens (user_id, token) VALUES ($1, $2)",
+            user_id, token_clone
+        )
+        .execute(&pool_clone)
+        .await;
+
+        if let Ok(cfg) = EmailConfig::from_env() {
+            let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+            let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+            let _ = send_email(&cfg, &email, "Verify your MtaaLink email", &email_verification_html(&verify_url)).await;
+        }
+    });
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Verification email sent" }))))
 }

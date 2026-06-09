@@ -47,6 +47,7 @@ type RawAuthResponse = {
   user_id: number;
   username: string;
   role: string;
+  email_verified?: boolean;
 };
 
 export const api = {
@@ -63,7 +64,7 @@ export const api = {
       const raw = await request<RawAuthResponse>("/auth/register", { method: "POST", body: data });
       return {
         token: raw.token,
-        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"] },
+        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"], email_verified: raw.email_verified ?? false },
       };
     },
 
@@ -71,7 +72,7 @@ export const api = {
       const raw = await request<RawAuthResponse>("/auth/login", { method: "POST", body: data });
       return {
         token: raw.token,
-        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"] },
+        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"], email_verified: raw.email_verified ?? false },
       };
     },
 
@@ -82,6 +83,9 @@ export const api = {
 
     resetPassword: (token: string, password: string) =>
       request("/auth/reset-password", { method: "POST", body: { token, password } }),
+
+    verifyEmail: (token: string) =>
+      request<{ message: string }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
   },
 
   // ── Dashboard ───────────────────────────────────────────────────────────
@@ -421,6 +425,7 @@ export type User = {
   username: string;
   email: string;
   role: "client" | "provider" | "business" | "admin";
+  email_verified?: boolean;
 };
 
 export type DashboardData = {
@@ -778,6 +783,10 @@ export type AdminUser = {
   username: string;
   email: string;
   role: string | null;
+  provider_id: number | null;
+  provider_approved: boolean | null;
+  business_id: number | null;
+  business_verified: boolean | null;
 };
 
 export type AdminPayout = {

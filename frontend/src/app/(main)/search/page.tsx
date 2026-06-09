@@ -11,7 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, SlidersHorizontal, Star, MapPin, Loader2 } from "lucide-react";
+import { Search, SlidersHorizontal, Star, MapPin, Loader2, Navigation } from "lucide-react";
+import { toast } from "sonner";
 
 const PER_PAGE = 12;
 
@@ -47,12 +48,21 @@ function ResultCard({ result }: { result: SearchResult }) {
             </div>
           </div>
 
-          {result.location && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3 shrink-0" />
-              <span className="truncate">{result.location}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {result.location && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 shrink-0" />
+                <span className="truncate">{result.location}</span>
+              </div>
+            )}
+            {result.distance_km != null && (
+              <span className="text-xs text-primary font-medium ml-auto shrink-0">
+                {result.distance_km < 1
+                  ? `${Math.round(result.distance_km * 1000)} m away`
+                  : `${result.distance_km.toFixed(1)} km away`}
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center justify-between mt-auto pt-1 border-t border-border">
             {result.avg_rating != null ? (
@@ -86,16 +96,42 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [userLat, setUserLat] = useState<number | null>(null);
+  const [userLng, setUserLng] = useState<number | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
 
   useEffect(() => {
     if (!_hasHydrated) return;
     if (user && user.role !== "client") router.replace("/dashboard");
   }, [_hasHydrated, user, router]);
 
-  const runSearch = useCallback(async (q: string, cat: string, nextPage = 1, append = false) => {
+  function useMyLocation() {
+    if (!navigator.geolocation) return;
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setUserLat(lat);
+        setUserLng(lng);
+        setGpsLoading(false);
+        runSearch(query, category, 1, false, lat, lng);
+      },
+      () => {
+        setGpsLoading(false);
+        toast.error("Could not get your location. Please allow location access.");
+      },
+      { timeout: 10000 },
+    );
+  }
+
+  const runSearch = useCallback(async (q: string, cat: string, nextPage = 1, append = false, lat?: number, lng?: number) => {
     if (nextPage === 1) setLoading(true);
     else setLoadingMore(true);
     setSearched(true);
+
+    const resolvedLat = lat ?? userLat ?? undefined;
+    const resolvedLng = lng ?? userLng ?? undefined;
 
     try {
       const res = await api.search.query({
@@ -103,6 +139,9 @@ function SearchContent() {
         category: cat || undefined,
         page: nextPage,
         per_page: PER_PAGE,
+        lat: resolvedLat ?? undefined,
+        lng: resolvedLng ?? undefined,
+        radius_km: resolvedLat ? 15 : undefined,
       });
       setResults((prev) => (append ? [...prev, ...res.results] : res.results));
       setTotal(res.total);
@@ -162,6 +201,21 @@ function SearchContent() {
             className="pl-9 bg-white"
           />
         </div>
+        <Button
+          type="button"
+          variant={userLat ? "default" : "outline"}
+          className="gap-1.5 shrink-0"
+          onClick={useMyLocation}
+          disabled={gpsLoading}
+          title="Search near my location"
+        >
+          {gpsLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Navigation className="h-4 w-4" />
+          )}
+          <span className="hidden sm:inline">{userLat ? "Near me ✓" : "Near me"}</span>
+        </Button>
         <Button type="submit">Search</Button>
       </form>
 

@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Search, Trash2 } from "lucide-react";
+import { Search, Trash2, CheckCircle2, XCircle, ShieldCheck } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const ROLE_COLORS: Record<string, string> = {
   client: "bg-blue-100 text-blue-700",
@@ -33,6 +34,7 @@ export default function AdminUsersPage() {
   const [query, setQuery] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [approving, setApproving] = useState<number | null>(null);
 
   useEffect(() => {
     if (!_hasHydrated) return;
@@ -60,6 +62,34 @@ export default function AdminUsersPage() {
     } finally {
       setDeleting(false);
       setDeleteId(null);
+    }
+  }
+
+  async function handleApprove(user: AdminUser) {
+    if (!token) return;
+    const entityType = user.provider_id ? "provider" : "business";
+    const entityId = user.provider_id ?? user.business_id;
+    if (!entityId) return;
+
+    setApproving(user.id);
+    try {
+      await api.admin.approve(entityType, entityId, true, token);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === user.id
+            ? {
+                ...u,
+                provider_approved: u.provider_id ? true : u.provider_approved,
+                business_verified: u.business_id ? true : u.business_verified,
+              }
+            : u,
+        ),
+      );
+      toast.success(`${entityType === "provider" ? "Provider approved" : "Business verified"}`);
+    } catch {
+      toast.error("Failed to approve");
+    } finally {
+      setApproving(null);
     }
   }
 
@@ -99,40 +129,78 @@ export default function AdminUsersPage() {
       </div>
 
       <div className="rounded-xl border border-border overflow-hidden bg-white">
-        <div className="grid grid-cols-[1fr_2fr_auto_auto] items-center gap-4 px-4 py-3 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <div className="grid grid-cols-[1fr_2fr_80px_120px_auto] items-center gap-3 px-4 py-3 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           <span>Username</span>
           <span>Email</span>
           <span>Role</span>
+          <span>Status</span>
           <span />
         </div>
         <Separator />
         {filtered.length === 0 ? (
           <p className="text-sm text-muted-foreground px-4 py-8 text-center">No users found.</p>
         ) : (
-          filtered.map((u, i) => (
-            <div key={u.id}>
-              {i > 0 && <Separator />}
-              <div className="grid grid-cols-[1fr_2fr_auto_auto] items-center gap-4 px-4 py-3">
-                <span className="text-sm font-medium text-foreground truncate">{u.username}</span>
-                <span className="text-sm text-muted-foreground truncate">{u.email}</span>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    ROLE_COLORS[u.role ?? ""] ?? "bg-gray-100 text-gray-700"
-                  }`}
-                >
-                  {u.role ?? "—"}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={() => setDeleteId(u.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+          filtered.map((u, i) => {
+            const isProvider = u.role === "provider";
+            const isBusiness = u.role === "business";
+            const isApproved = isProvider ? u.provider_approved : isBusiness ? u.business_verified : null;
+            const needsApproval = (isProvider || isBusiness) && isApproved === false;
+            const isApprovingThis = approving === u.id;
+
+            return (
+              <div key={u.id}>
+                {i > 0 && <Separator />}
+                <div className={cn(
+                  "grid grid-cols-[1fr_2fr_80px_120px_auto] items-center gap-3 px-4 py-3",
+                  needsApproval && "bg-amber-50/50",
+                )}>
+                  <span className="text-sm font-medium text-foreground truncate">{u.username}</span>
+                  <span className="text-sm text-muted-foreground truncate">{u.email}</span>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      ROLE_COLORS[u.role ?? ""] ?? "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {u.role ?? "—"}
+                  </span>
+
+                  {/* Approval status */}
+                  <div className="flex items-center gap-1.5">
+                    {isApproved === true && (
+                      <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 font-medium">
+                        <CheckCircle2 className="h-3 w-3" />
+                        {isProvider ? "Approved" : "Verified"}
+                      </span>
+                    )}
+                    {isApproved === false && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50 gap-1"
+                        onClick={() => handleApprove(u)}
+                        disabled={isApprovingThis}
+                      >
+                        <ShieldCheck className="h-3 w-3" />
+                        {isApprovingThis ? "…" : (isProvider ? "Approve" : "Verify")}
+                      </Button>
+                    )}
+                    {isApproved === null && (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => setDeleteId(u.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
