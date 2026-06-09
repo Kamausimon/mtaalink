@@ -25,6 +25,7 @@ type FormData = z.infer<typeof schema>;
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const setIsAdmin = useAuthStore((s) => s.setIsAdmin);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -40,7 +41,15 @@ export default function LoginPage() {
       const res = await api.auth.login(data);
       setAuth(res.token, res.user);
       toast.success(`Welcome back, ${res.user.username}`);
-      router.push("/dashboard");
+      // Check admin status and redirect accordingly
+      try {
+        await api.admin.dashboard(res.token);
+        setIsAdmin(true);
+        router.push("/admin");
+      } catch {
+        setIsAdmin(false);
+        router.push("/dashboard");
+      }
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Login failed";
       toast.error(msg);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
-import { api, type DashboardData } from "@/lib/api";
+import { api, type DashboardData, ApiError } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,7 +20,7 @@ import {
 import Link from "next/link";
 
 export default function DashboardPage() {
-  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
+  const { token, user, isAuthenticated, isAdmin, setIsAdmin, _hasHydrated } = useAuthStore();
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,6 +30,18 @@ export default function DashboardPage() {
     if (!_hasHydrated) return;
     if (!isAuthenticated) {
       router.push("/login");
+      return;
+    }
+    // Check admin status once and redirect admins to the admin panel
+    if (!isAdmin) {
+      api.admin.dashboard(token!).then(() => {
+        setIsAdmin(true);
+        router.replace("/admin");
+      }).catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 403) setIsAdmin(false);
+      });
+    } else {
+      router.replace("/admin");
       return;
     }
     api.dashboard.get(token!).then(async (d) => {

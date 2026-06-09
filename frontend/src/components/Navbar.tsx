@@ -12,11 +12,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Bell, Menu, X, Search, Heart } from "lucide-react";
+import { Bell, Menu, X, Search, Heart, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 export default function Navbar() {
-  const { user, isAuthenticated, clearAuth } = useAuthStore();
+  const { user, isAuthenticated, isAdmin, clearAuth } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,9 +39,10 @@ export default function Navbar() {
           { href: "/bookings", label: "Bookings" },
           { href: "/availability", label: "Availability" },
           { href: "/services", label: "Services" },
+          { href: "/analytics", label: "Analytics" },
         ]
       : isBusiness
-      ? [{ href: "/bookings", label: "Bookings" }, { href: "/services", label: "Services" }]
+      ? [{ href: "/bookings", label: "Bookings" }, { href: "/services", label: "Services" }, { href: "/analytics", label: "Analytics" }]
       : [
           { href: "/search", label: "Find Services" },
           { href: "/favorites", label: "Favourites" },
@@ -129,6 +130,12 @@ export default function Navbar() {
                     {(user.role === "provider" || user.role === "business") && (
                       <DropdownMenuItem onClick={() => router.push("/wallet")}>
                         Wallet
+                      </DropdownMenuItem>
+                    )}
+                    {isAdmin && (
+                      <DropdownMenuItem onClick={() => router.push("/admin")} className="gap-2 text-primary font-medium">
+                        <ShieldCheck className="h-4 w-4" />
+                        Admin Panel
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
