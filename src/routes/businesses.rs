@@ -42,6 +42,7 @@ pub struct BusinessOnboardRequest {
     pub email: String,
     pub website: Option<String>,
     pub whatsapp: Option<String>,
+    pub profile_photo: Option<String>,
 }
 
 pub async fn onboard_business(
@@ -67,11 +68,19 @@ pub async fn onboard_business(
     let mut tx = pool.begin().await?;
 
     let record = sqlx::query!(
-        "UPDATE businesses SET (
-            business_name, description, category, location, license_number,
-            krapin, phone_number, email, website, whatsapp
-         ) = ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         WHERE user_id = $11 RETURNING id",
+        r#"UPDATE businesses SET
+            business_name = $1,
+            description = $2,
+            category = $3,
+            location = $4,
+            license_number = $5,
+            krapin = $6,
+            phone_number = $7,
+            email = $8,
+            website = $9,
+            whatsapp = $10,
+            profile_photo = COALESCE($11, profile_photo)
+         WHERE user_id = $12 RETURNING id"#,
         payload.business_name,
         payload.description,
         payload.category,
@@ -82,6 +91,7 @@ pub async fn onboard_business(
         payload.email,
         payload.website,
         payload.whatsapp,
+        payload.profile_photo,
         user_id
     )
     .fetch_one(&mut *tx)

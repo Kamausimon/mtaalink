@@ -23,10 +23,10 @@ use uuid::Uuid;
 use validator::Validate;
 
 pub fn auth_routes(pool: PgPool) -> Router {
-    let governor_config = Arc::new(
+    let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(2)
-            .burst_size(8)
+            .per_second(3)
+            .burst_size(10)
             .finish()
             .unwrap(),
     );
@@ -39,7 +39,7 @@ pub fn auth_routes(pool: PgPool) -> Router {
         .route("/reset-password", post(reset_password))
         .route("/verify-email", get(verify_email))
         .route("/resend-verification", post(resend_verification))
-        .layer(GovernorLayer { config: governor_config })
+        .layer(GovernorLayer { config: governor_conf })
         .with_state(pool)
 }
 

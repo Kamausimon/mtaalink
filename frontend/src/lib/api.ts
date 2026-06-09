@@ -733,6 +733,7 @@ export type ProviderOnboardInput = {
   email: string;
   website?: string;
   whatsapp?: string;
+  profile_photo?: string;
 };
 
 export type BusinessOnboardInput = {
@@ -746,6 +747,7 @@ export type BusinessOnboardInput = {
   email: string;
   website?: string;
   whatsapp?: string;
+  profile_photo?: string;
 };
 
 export type Post = {
