@@ -110,6 +110,33 @@ pub fn password_reset_html(reset_url: &str, expiry_minutes: u64) -> String {
     )
 }
 
+pub fn email_verification_html(verify_url: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h2 style="color: #333;">Verify your email address</h2>
+  <p>Thanks for joining MtaaLink! Please verify your email address to complete your registration.</p>
+  <p style="margin: 30px 0;">
+    <a href="{verify_url}"
+       style="background-color: #4CAF50; color: white; padding: 12px 24px;
+              text-decoration: none; border-radius: 4px; display: inline-block;">
+      Verify Email Address
+    </a>
+  </p>
+  <p style="color: #666; font-size: 14px;">This link expires in 24 hours.</p>
+  <p style="color: #666; font-size: 14px;">
+    If you did not create a MtaaLink account, you can safely ignore this email.
+  </p>
+  <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+  <p style="color: #999; font-size: 12px;">MtaaLink — Connecting you to local services</p>
+</body>
+</html>"#,
+        verify_url = verify_url,
+    )
+}
+
 pub fn booking_confirmation_html(
     client_name: &str,
     service_description: &str,
