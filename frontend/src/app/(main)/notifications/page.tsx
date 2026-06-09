@@ -7,10 +7,33 @@ import { api, type Notification } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { Bell, CheckCheck } from "lucide-react";
+import { Bell, CheckCheck, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+function getNotifRoute(n: Notification): string | null {
+  const { notif_type, target_type, target_id } = n;
+  switch (notif_type) {
+    case "booking_created":
+    case "confirmed":
+    case "cancelled":
+    case "completed":
+    case "pending_confirmation":
+    case "disputed_by_client":
+    case "disputed_by_provider":
+      return "/bookings";
+    case "new_message":
+      return "/messages";
+    case "new_post":
+    case "new_review":
+      if (target_type === "provider" && target_id) return `/providers/${target_id}`;
+      if (target_type === "business" && target_id) return `/businesses/${target_id}`;
+      return null;
+    default:
+      return null;
+  }
+}
 
 export default function NotificationsPage() {
   const { token, isAuthenticated, _hasHydrated } = useAuthStore();
@@ -57,6 +80,12 @@ export default function NotificationsPage() {
     }
   }
 
+  async function handleClick(n: Notification) {
+    if (!n.is_read) await markOneRead(n.id);
+    const route = getNotifRoute(n);
+    if (route) router.push(route);
+  }
+
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   return (
@@ -92,36 +121,44 @@ export default function NotificationsPage() {
             <p className="text-sm text-muted-foreground mt-1">No notifications yet.</p>
           </div>
         ) : (
-          notifications.map((n, i) => (
-            <div key={n.id}>
-              {i > 0 && <Separator />}
-              <button
-                type="button"
-                onClick={() => !n.is_read && markOneRead(n.id)}
-                className={cn(
-                  "w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-muted/30",
-                  !n.is_read && "bg-primary/5",
-                )}
-              >
-                <div className="mt-0.5 shrink-0">
-                  {!n.is_read ? (
-                    <div className="h-2.5 w-2.5 rounded-full bg-primary mt-1" />
-                  ) : (
-                    <div className="h-2.5 w-2.5" />
+          notifications.map((n, i) => {
+            const route = getNotifRoute(n);
+            return (
+              <div key={n.id}>
+                {i > 0 && <Separator />}
+                <button
+                  type="button"
+                  onClick={() => handleClick(n)}
+                  className={cn(
+                    "w-full text-left flex items-start gap-3 px-4 py-4 transition-colors hover:bg-muted/30",
+                    !n.is_read && "bg-primary/5",
+                    route && "cursor-pointer",
+                    !route && "cursor-default",
                   )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={cn("text-sm", !n.is_read ? "font-semibold text-foreground" : "font-medium text-foreground")}>
-                    {n.title}
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-0.5">{n.body}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {format(new Date(n.created_at), "d MMM yyyy, h:mm a")}
-                  </p>
-                </div>
-              </button>
-            </div>
-          ))
+                >
+                  <div className="mt-0.5 shrink-0">
+                    {!n.is_read ? (
+                      <div className="h-2.5 w-2.5 rounded-full bg-primary mt-1" />
+                    ) : (
+                      <div className="h-2.5 w-2.5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={cn("text-sm", !n.is_read ? "font-semibold text-foreground" : "font-medium text-foreground")}>
+                      {n.title}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{n.body}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {format(new Date(n.created_at), "d MMM yyyy, h:mm a")}
+                    </p>
+                  </div>
+                  {route && (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                  )}
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
     </div>

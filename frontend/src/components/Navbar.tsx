@@ -38,9 +38,10 @@ export default function Navbar() {
       ? [
           { href: "/bookings", label: "Bookings" },
           { href: "/availability", label: "Availability" },
+          { href: "/services", label: "Services" },
         ]
       : isBusiness
-      ? [{ href: "/bookings", label: "Bookings" }]
+      ? [{ href: "/bookings", label: "Bookings" }, { href: "/services", label: "Services" }]
       : [
           { href: "/search", label: "Find Services" },
           { href: "/favorites", label: "Favourites" },
@@ -113,6 +114,16 @@ export default function Navbar() {
                       <DropdownMenuItem onClick={() => router.push("/favorites")} className="gap-2">
                         <Heart className="h-4 w-4" />
                         Favourites
+                      </DropdownMenuItem>
+                    )}
+                    {(user.role === "provider" || user.role === "business") && (
+                      <DropdownMenuItem onClick={() => router.push("/my-profile")}>
+                        My Public Profile
+                      </DropdownMenuItem>
+                    )}
+                    {(user.role === "provider" || user.role === "business") && (
+                      <DropdownMenuItem onClick={() => router.push("/services")}>
+                        Manage Services
                       </DropdownMenuItem>
                     )}
                     {(user.role === "provider" || user.role === "business") && (

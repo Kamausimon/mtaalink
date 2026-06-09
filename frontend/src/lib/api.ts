@@ -281,6 +281,19 @@ export const api = {
       request(`/notifications/${id}/read`, { method: "POST", token }),
   },
 
+  // ── Services ────────────────────────────────────────────────────────────
+  services: {
+    list: (targetType: string, targetId: number, token: string) =>
+      request<{ services: ManagedService[] }>(
+        `/services/getServices?target_type=${targetType}&target_id=${targetId}`, { token }),
+    create: (data: CreateServiceInput, token: string) =>
+      request<{ service_id: number }>("/services/createService", { method: "POST", body: data, token }),
+    update: (data: UpdateServiceInput, token: string) =>
+      request("/services/updateService", { method: "POST", body: data, token }),
+    delete: (serviceId: number, token: string) =>
+      request("/services/deleteService", { method: "POST", body: { service_id: serviceId }, token }),
+  },
+
   // ── Wallet ──────────────────────────────────────────────────────────────
   wallet: {
     get: (target_type: string, target_id: number, token: string) =>
@@ -468,6 +481,41 @@ export type Service = {
   category_id?: number;
 };
 
+export type ManagedService = {
+  id: number;
+  target_id: number;
+  target_type: string;
+  title: string;
+  description: string;
+  price: string;
+  duration: number;
+  category_id?: number;
+  is_active: boolean;
+};
+
+export type CreateServiceInput = {
+  target_id: number;
+  target_type: string;
+  title: string;
+  description: string;
+  price: number;
+  duration: number;
+  category_id?: number;
+  is_active: boolean;
+};
+
+export type UpdateServiceInput = {
+  service_id: number;
+  target_id: number;
+  target_type: string;
+  title?: string;
+  description?: string;
+  price?: number;
+  duration?: number;
+  category_id?: number;
+  is_active?: boolean;
+};
+
 export type Branch = {
   id: number;
   name: string;
@@ -572,6 +620,7 @@ export type Wallet = {
 
 export type Transaction = {
   id: number;
+  txn_type: "credit" | "debit";
   amount: string;
   description: string;
   created_at: string;
@@ -616,6 +665,7 @@ export type Post = {
   business_id?: number;
   image_urls: string[];
   like_count: number;
+  comment_count: number;
   created_at: string;
   updated_at: string;
 };

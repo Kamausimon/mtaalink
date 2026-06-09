@@ -76,28 +76,47 @@ function ImageCarousel({ urls }: { urls: string[] }) {
 
 // ── Comment thread ────────────────────────────────────────────────────────────
 
-function CommentThread({ postId }: { postId: number }) {
-  const { token, user, isAuthenticated } = useAuthStore();
+function CommentThread({ postId, onCountChange }: { postId: number; onCountChange: (n: number) => void }) {
+  const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const [comments, setComments] = useState<PostComment[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    api.posts.comments(postId).then((r) => setComments(r.comments)).catch(() => {});
+    api.posts.comments(postId).then((r) => {
+      setComments(r.comments);
+      onCountChange(r.comments.length);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || !token) return;
+    if (!input.trim()) return;
+    if (!token || !isAuthenticated) {
+      toast.error("Please sign in to comment");
+      return;
+    }
     setSending(true);
     try {
       await api.posts.addComment(postId, input.trim(), token);
-      setComments((prev) => [...prev, {
-        id: Date.now(), user_id: user!.id, username: user!.username,
-        comment: input.trim(), created_at: new Date().toISOString(),
-      }]);
+      setComments((prev) => {
+        const updated = [...prev, {
+          id: Date.now(), user_id: user!.id, username: user!.username,
+          comment: input.trim(), created_at: new Date().toISOString(),
+        }];
+        onCountChange(updated.length);
+        return updated;
+      });
       setInput("");
-    } catch { toast.error("Could not post comment"); }
+    } catch (err: unknown) {
+      const status = err instanceof Error && "status" in err ? (err as { status: number }).status : 0;
+      if (status === 401) {
+        toast.error("Session expired — please log in again");
+      } else {
+        toast.error("Could not post comment");
+      }
+    }
     finally { setSending(false); }
   }
 
@@ -105,7 +124,11 @@ function CommentThread({ postId }: { postId: number }) {
     if (!token) return;
     try {
       await api.posts.deleteComment(postId, commentId, token);
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      setComments((prev) => {
+        const updated = prev.filter((c) => c.id !== commentId);
+        onCountChange(updated.length);
+        return updated;
+      });
     } catch { toast.error("Could not delete comment"); }
   }
 
@@ -129,7 +152,7 @@ function CommentThread({ postId }: { postId: number }) {
           )}
         </div>
       ))}
-      {isAuthenticated && (
+      {_hasHydrated && isAuthenticated && (
         <form onSubmit={submit} className="flex gap-2 mt-1">
           <Input value={input} onChange={(e) => setInput(e.target.value)}
             placeholder="Add a comment…" className="h-8 text-sm" disabled={sending} />
@@ -148,6 +171,7 @@ function PostCard({ post, isOwner, onDeleted }: { post: Post; isOwner: boolean; 
   const { token, isAuthenticated } = useAuthStore();
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.like_count);
+  const [commentCount, setCommentCount] = useState(post.comment_count ?? 0);
   const [showComments, setShowComments] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -201,14 +225,19 @@ function PostCard({ post, isOwner, onDeleted }: { post: Post; isOwner: boolean; 
           <button type="button" onClick={() => setShowComments((v) => !v)}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <MessageCircle className="h-4 w-4" />
-            <span>Comments</span>
+            <span>{commentCount > 0 ? `${commentCount} comment${commentCount === 1 ? "" : "s"}` : "Comment"}</span>
           </button>
           <span className="text-xs text-muted-foreground ml-auto">
             {format(new Date(post.created_at), "d MMM yyyy")}
           </span>
         </div>
 
-        {showComments && <CommentThread postId={post.id} />}
+        {showComments && (
+          <CommentThread
+            postId={post.id}
+            onCountChange={(n) => setCommentCount(n)}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -281,6 +310,7 @@ function CreatePostDialog({ open, onClose, providerId, businessId, onCreated }: 
         business_id: businessId,
         image_urls: imageUrls,
         like_count: 0,
+        comment_count: 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };

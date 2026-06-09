@@ -135,7 +135,7 @@ pub async fn create_reviews(
         &pool, &ws_conns, &target_type, target_id,
         "new_review", "New Review",
         &format!("You received a {}-star review", payload.rating),
-        Some("review"), Some(review.id),
+        Some(target_type.as_str()), Some(target_id),
     ).await;
 
     Ok((
