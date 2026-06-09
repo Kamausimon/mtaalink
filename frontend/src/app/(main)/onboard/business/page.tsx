@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { Building2, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
+import { uploadToCloudinary } from "@/lib/cloudinary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +39,23 @@ export default function BusinessOnboardPage() {
   const { token, user, isAuthenticated } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      setLogoUrl(url);
+    } catch {
+      toast.error("Logo upload failed. Try again.");
+    } finally {
+      setLogoUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== "business") {
@@ -72,6 +91,7 @@ export default function BusinessOnboardPage() {
           email: data.email,
           website: data.website || undefined,
           whatsapp: data.whatsapp || undefined,
+          profile_photo: logoUrl || undefined,
         },
         token!,
       );
@@ -95,6 +115,39 @@ export default function BusinessOnboardPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {/* Business logo */}
+            <div className="flex flex-col items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleLogoChange}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="relative w-24 h-24 rounded-xl border-2 border-dashed border-border bg-muted hover:border-primary transition-colors overflow-hidden"
+                disabled={logoUploading}
+              >
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Business logo" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-1">
+                    {logoUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    ) : (
+                      <>
+                        <Building2 className="h-5 w-5 text-muted-foreground" />
+                        <span className="text-[10px] text-muted-foreground">Add logo</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </button>
+              <p className="text-xs text-muted-foreground">Business logo (optional)</p>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Business name</Label>
               <Input placeholder="e.g. Bright Cleaning Solutions Ltd" {...register("business_name")} />

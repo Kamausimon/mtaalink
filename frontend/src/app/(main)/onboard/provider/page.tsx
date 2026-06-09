@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { Camera, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
+import { uploadToCloudinary } from "@/lib/cloudinary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,6 +38,23 @@ export default function ProviderOnboardPage() {
   const { token, user, isAuthenticated } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      setPhotoUrl(url);
+    } catch {
+      toast.error("Photo upload failed. Try again.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!isAuthenticated || user?.role !== "provider") {
@@ -69,6 +88,7 @@ export default function ProviderOnboardPage() {
           email: data.email,
           website: data.website || undefined,
           whatsapp: data.whatsapp || undefined,
+          profile_photo: photoUrl || undefined,
         },
         token!,
       );
@@ -92,6 +112,39 @@ export default function ProviderOnboardPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            {/* Profile photo */}
+            <div className="flex flex-col items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="relative w-24 h-24 rounded-full border-2 border-dashed border-border bg-muted hover:border-primary transition-colors overflow-hidden"
+                disabled={photoUploading}
+              >
+                {photoUrl ? (
+                  <img src={photoUrl} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-1">
+                    {photoUploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    ) : (
+                      <>
+                        <Camera className="h-5 w-5 text-muted-foreground" />
+                        <span className="text-[10px] text-muted-foreground">Add photo</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </button>
+              <p className="text-xs text-muted-foreground">Profile photo (optional)</p>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Your service / trade name</Label>
               <Input placeholder="e.g. John's Plumbing Services" {...register("service_name")} />

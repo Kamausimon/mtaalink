@@ -136,7 +136,7 @@ async fn main() {
     let addr = SocketAddr::from(([127, 0, 0, 1], port.parse::<u16>().unwrap()));
     println!("listening on http://{}", addr);
 
-    bind(addr).serve(app.into_make_service()).await.unwrap();
+    bind(addr).serve(app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }
 
 async fn root() -> &'static str {

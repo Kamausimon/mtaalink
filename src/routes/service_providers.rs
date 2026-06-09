@@ -43,6 +43,7 @@ pub struct ProviderOnboardRequest {
     pub email: String,
     pub website: Option<String>,
     pub whatsapp: Option<String>,
+    pub profile_photo: Option<String>,
 }
 
 pub async fn onboard_service_provider(
@@ -68,11 +69,17 @@ pub async fn onboard_service_provider(
     let mut tx = pool.begin().await?;
 
     let record = sqlx::query!(
-        "UPDATE providers SET (
-             service_name, service_description, category, location,
-             phone_number, email, website, whatsapp
-         ) = ($1, $2, $3, $4, $5, $6, $7, $8)
-         WHERE user_id = $9 RETURNING id",
+        r#"UPDATE providers SET
+             service_name = $1,
+             service_description = $2,
+             category = $3,
+             location = $4,
+             phone_number = $5,
+             email = $6,
+             website = $7,
+             whatsapp = $8,
+             profile_photo = COALESCE($9, profile_photo)
+         WHERE user_id = $10 RETURNING id"#,
         payload.service_name,
         payload.service_description,
         payload.category,
@@ -81,6 +88,7 @@ pub async fn onboard_service_provider(
         payload.email,
         payload.website,
         payload.whatsapp,
+        payload.profile_photo,
         user_id
     )
     .fetch_one(&mut *tx)
