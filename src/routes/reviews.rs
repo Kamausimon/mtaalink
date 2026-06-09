@@ -21,6 +21,7 @@ pub fn reviews_routes(pool: PgPool) -> Router {
         .route("/rankBusinesses", get(rank_businesses))
         .route("/getReviewAggById", get(get_review_agg_by_id))
         .route("/:id/replyReview", post(reply_review))
+        .route("/:id/flag", post(flag_review))
         .with_state(pool)
 }
 
@@ -337,4 +338,51 @@ pub async fn reply_review(
         StatusCode::CREATED,
         Json(json!({ "message": "Reply posted successfully", "reply": reply })),
     ))
+}
+
+// ── Flag a review (any logged-in user) ───────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct FlagPayload {
+    pub reason: String,
+}
+
+pub async fn flag_review(
+    State(pool): State<PgPool>,
+    CurrentUser { user_id }: CurrentUser,
+    Path(review_id): Path<i32>,
+    Json(payload): Json<FlagPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let reason = payload.reason.trim().to_string();
+    if reason.is_empty() {
+        return Err(AppError::BadRequest("Reason cannot be empty".to_string()));
+    }
+
+    // Verify review exists
+    let exists = sqlx::query_scalar!("SELECT id FROM reviews WHERE id = $1", review_id)
+        .fetch_optional(&pool)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound("Review not found".to_string()));
+    }
+
+    // Prevent the same user flagging the same review twice
+    let already = sqlx::query_scalar!(
+        "SELECT id FROM content_flags WHERE target_type = 'review' AND target_id = $1 AND flagged_by = $2",
+        review_id, user_id
+    )
+    .fetch_optional(&pool)
+    .await?;
+    if already.is_some() {
+        return Err(AppError::Conflict("You have already reported this review".to_string()));
+    }
+
+    sqlx::query!(
+        "INSERT INTO content_flags (target_type, target_id, reason, flagged_by) VALUES ('review', $1, $2, $3)",
+        review_id, reason, user_id
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(serde_json::json!({ "message": "Review reported — our team will review it" }))))
 }

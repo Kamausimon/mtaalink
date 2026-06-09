@@ -214,6 +214,25 @@ export const api = {
       }),
     delete: (id: number, token: string) =>
       request(`/bookings/${id}/delete`, { method: "POST", token }),
+    submitDisputeResponse: (id: number, response: string, token: string) =>
+      request(`/bookings/${id}/dispute_response`, { method: "POST", body: { response }, token }),
+    uploadEvidence: async (id: number, file: File, caption: string, token: string): Promise<{ url: string }> => {
+      const form = new FormData();
+      form.append("file", file);
+      if (caption.trim()) form.append("caption", caption.trim());
+      const res = await fetch(`${BASE_URL}/bookings/${id}/evidence`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, err.message ?? "Upload failed");
+      }
+      return res.json();
+    },
+    getEvidence: (id: number, token: string) =>
+      request<{ evidence: DisputeEvidence[] }>(`/bookings/${id}/evidence`, { token }),
   },
 
   // ── Payments ────────────────────────────────────────────────────────────
@@ -243,6 +262,8 @@ export const api = {
       request<{ aggregated_rating: { average_rating: number; review_count: number } }>(
         `/reviews/getReviewAggById?target_type=${target_type}&target_id=${target_id}`,
       ),
+    flag: (reviewId: number, reason: string, token: string) =>
+      request(`/reviews/${reviewId}/flag`, { method: "POST", body: { reason }, token }),
   },
 
   // ── Messages ────────────────────────────────────────────────────────────
@@ -265,6 +286,20 @@ export const api = {
       request<{ unread_count: number }>("/messages/unreadMessagesCount", { token }),
     markRead: (messageIds: number[], token: string) =>
       request("/messages/markMessagesAsRead", { method: "POST", body: { message_ids: messageIds }, token }),
+    uploadAttachment: async (file: File, token: string): Promise<{ url: string }> => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${BASE_URL}/messages/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, err.message ?? "Upload failed");
+      }
+      return res.json();
+    },
   },
 
   // ── Notifications ────────────────────────────────────────────────────────
@@ -379,8 +414,16 @@ export const api = {
       request("/admin/delete_category", { method: "POST", body: { category_id: categoryId }, token }),
     flaggedReviews: (token: string) =>
       request<{ flagged_reviews: FlaggedReview[] }>("/admin/moderateReviews", { token }),
-    resolveFlag: (flagId: number, token: string) =>
-      request("/admin/resolveFlag", { method: "POST", body: { flag_id: flagId }, token }),
+    resolveFlag: (reviewId: number, token: string) =>
+      request("/admin/resolveFlag", { method: "POST", body: { review_id: reviewId }, token }),
+    disputes: (token: string) =>
+      request<{ disputes: AdminDispute[] }>("/admin/disputes", { token }),
+    resolveDispute: (bookingId: number, resolution: "completed" | "cancelled", note: string | null, token: string) =>
+      request(`/admin/disputes/${bookingId}/resolve`, { method: "POST", body: { resolution, note }, token }),
+    suspend: (entityType: "provider" | "business", entityId: number, days: number, token: string) =>
+      request(`/admin/suspend/${entityType}/${entityId}`, { method: "POST", body: { days }, token }),
+    unsuspend: (entityType: "provider" | "business", entityId: number, token: string) =>
+      request(`/admin/unsuspend/${entityType}/${entityId}`, { method: "POST", token }),
   },
 };
 
@@ -587,6 +630,8 @@ export type Booking = {
   client_phone?: string;
   cancel_reason?: string;
   dispute_reason?: string;
+  dispute_response?: string;
+  admin_resolution?: string;
   created_at?: string;
 };
 
@@ -773,4 +818,28 @@ export type AdminUserAnalytics = {
   users: { clients: number; providers: number; businesses: number; total: number };
   bookings: { pending: number; confirmed: number; completed: number; cancelled: number };
   signups_last_7_days: { day: string; count: number }[];
+};
+
+export type DisputeEvidence = {
+  id: number;
+  uploader_role: "client" | "provider";
+  file_url: string;
+  caption: string | null;
+  created_at: string | null;
+};
+
+export type AdminDispute = {
+  booking_id: number;
+  client_id: number;
+  client_username: string;
+  service_owner_user_id: number | null;
+  target_type: string;
+  target_id: number;
+  provider_name: string | null;
+  service_description: string | null;
+  scheduled_time: string;
+  dispute_reason: string | null;
+  dispute_response: string | null;
+  admin_resolution: string | null;
+  created_at: string | null;
 };

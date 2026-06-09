@@ -9,16 +9,23 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Send, MessageCircle } from "lucide-react";
+import { Send, MessageCircle, ImagePlus, X } from "lucide-react";
 import { format, isToday, isThisYear } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7878";
 
 function formatConvTime(iso: string) {
   const d = new Date(iso);
   if (isToday(d)) return format(d, "h:mm a");
   if (isThisYear(d)) return format(d, "d MMM");
   return format(d, "d MMM yyyy");
+}
+
+function isImageUrl(content: string) {
+  return content.startsWith("/uploads/messages/") &&
+    /\.(jpg|jpeg|png|webp|heic|gif)$/i.test(content);
 }
 
 type WsMessage = {
@@ -30,6 +37,8 @@ type WsMessage = {
   created_at: string;
 };
 
+type PendingImage = { file: File; preview: string };
+
 export default function MessagesPage() {
   const { token, user, isAuthenticated, _hasHydrated } = useAuthStore();
   const router = useRouter();
@@ -39,10 +48,11 @@ export default function MessagesPage() {
   const [msgInput, setMsgInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<Conversation | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Keep ref in sync so WS handler always sees current conversation
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
@@ -67,7 +77,6 @@ export default function MessagesPage() {
       })
       .then((r) => {
         setMessages(r.messages);
-        // Mark all unread messages sent TO us as read
         const unreadIds = r.messages
           .filter((m) => !m.is_read && m.sender_id !== user?.id)
           .map((m) => m.id);
@@ -82,7 +91,6 @@ export default function MessagesPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // WebSocket — real-time incoming messages
   useWebSocket(token ?? null, {
     new_message: (raw) => {
       const msg = raw as WsMessage;
@@ -93,7 +101,6 @@ export default function MessagesPage() {
         cur.target_type === msg.target_type &&
         cur.target_id === msg.target_id;
 
-      // Append to open thread and mark as read immediately
       if (isCurrentThread) {
         setMessages((prev) => [
           ...prev,
@@ -109,7 +116,6 @@ export default function MessagesPage() {
         api.messages.markRead([msg.id], token!).catch(() => {});
       }
 
-      // Update conversation list
       setConversations((prev) => {
         const exists = prev.find(
           (c) =>
@@ -131,16 +137,14 @@ export default function MessagesPage() {
               : c,
           );
         }
-        // New conversation — reload list
         api.messages.conversations(token!).then((r) => setConversations(r.conversations)).catch(() => {});
         return prev;
       });
     },
   });
 
-  async function selectConversation(conv: Conversation) {
+  function selectConversation(conv: Conversation) {
     setSelected(conv);
-    // Mark unread count as 0 in list immediately
     setConversations((prev) =>
       prev.map((c) =>
         c.other_user_id === conv.other_user_id &&
@@ -152,47 +156,88 @@ export default function MessagesPage() {
     );
   }
 
-  async function sendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    const text = msgInput.trim();
-    if (!text || !selected || sending) return;
+  function onImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please select an image file"); return; }
+    const preview = URL.createObjectURL(file);
+    setPendingImage({ file, preview });
+    // Reset input so the same file can be picked again
+    e.target.value = "";
+  }
 
+  function removePendingImage() {
+    if (pendingImage) URL.revokeObjectURL(pendingImage.preview);
+    setPendingImage(null);
+  }
+
+  function appendOptimistic(content: string) {
     const optimistic: Message = {
-      id: Date.now(),
+      id: Date.now() + Math.random(),
       sender_id: user!.id,
-      receiver_id: selected.other_user_id,
-      content: text,
+      receiver_id: selected!.other_user_id,
+      content,
       created_at: new Date().toISOString(),
       is_read: false,
     };
-
-    setMsgInput("");
     setMessages((prev) => [...prev, optimistic]);
     setConversations((prev) =>
       prev.map((c) =>
-        c.other_user_id === selected.other_user_id &&
-        c.target_type === selected.target_type &&
-        c.target_id === selected.target_id
-          ? { ...c, last_message: text, last_message_at: optimistic.created_at }
+        c.other_user_id === selected!.other_user_id &&
+        c.target_type === selected!.target_type &&
+        c.target_id === selected!.target_id
+          ? { ...c, last_message: content, last_message_at: optimistic.created_at }
           : c,
       ),
     );
+    return optimistic.id;
+  }
+
+  async function sendMessage(e: React.FormEvent) {
+    e.preventDefault();
+    const text = msgInput.trim();
+    if ((!text && !pendingImage) || !selected || sending) return;
 
     setSending(true);
+    const captionText = text;
+    setMsgInput("");
+
     try {
-      await api.messages.send(
-        {
-          receiver_id: selected.other_user_id,
-          content: text,
-          target_type: selected.target_type,
-          target_id: selected.target_id,
-        },
-        token!,
-      );
-    } catch {
-      toast.error("Failed to send message");
-      // Roll back optimistic message
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      // If there's an image, upload it first then send as a message
+      if (pendingImage) {
+        const optimId = appendOptimistic(pendingImage.preview); // temporary local preview
+        removePendingImage();
+        try {
+          const { url } = await api.messages.uploadAttachment(pendingImage?.file ?? ({} as File), token!);
+          // Replace temporary optimistic with real URL
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === optimId ? { ...m, content: url } : m,
+            ),
+          );
+          await api.messages.send(
+            { receiver_id: selected.other_user_id, content: url, target_type: selected.target_type, target_id: selected.target_id },
+            token!,
+          );
+        } catch {
+          setMessages((prev) => prev.filter((m) => m.id !== optimId));
+          toast.error("Failed to send image");
+        }
+      }
+
+      // Send text message if any
+      if (captionText) {
+        const optimId = appendOptimistic(captionText);
+        try {
+          await api.messages.send(
+            { receiver_id: selected.other_user_id, content: captionText, target_type: selected.target_type, target_id: selected.target_id },
+            token!,
+          );
+        } catch {
+          setMessages((prev) => prev.filter((m) => m.id !== optimId));
+          toast.error("Failed to send message");
+        }
+      }
     } finally {
       setSending(false);
     }
@@ -225,7 +270,7 @@ export default function MessagesPage() {
             ) : (
               conversations.map((conv) => {
                 const unread = conv.unread_count > 0;
-                const isSelected =
+                const isSelectedConv =
                   selected?.other_user_id === conv.other_user_id &&
                   selected?.target_id === conv.target_id;
                 return (
@@ -235,8 +280,8 @@ export default function MessagesPage() {
                     onClick={() => selectConversation(conv)}
                     className={cn(
                       "w-full text-left px-3 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors border-b border-border/50",
-                      isSelected && "bg-primary/5 border-l-2 border-l-primary",
-                      unread && !isSelected && "bg-blue-50/50",
+                      isSelectedConv && "bg-primary/5 border-l-2 border-l-primary",
+                      unread && !isSelectedConv && "bg-blue-50/50",
                     )}
                   >
                     <Avatar className="h-9 w-9 shrink-0">
@@ -255,7 +300,7 @@ export default function MessagesPage() {
                       </div>
                       <div className="flex items-center justify-between gap-1 mt-0.5">
                         <p className={cn("text-xs truncate", unread ? "text-foreground font-medium" : "text-muted-foreground")}>
-                          {conv.last_message}
+                          {isImageUrl(conv.last_message) ? "📷 Image" : conv.last_message}
                         </p>
                         {unread && (
                           <span className="text-xs bg-primary text-white rounded-full h-4 w-4 flex items-center justify-center shrink-0 font-medium">
@@ -302,6 +347,8 @@ export default function MessagesPage() {
                   const showDateSep =
                     !prevDate ||
                     format(msgDate, "yyyy-MM-dd") !== format(prevDate, "yyyy-MM-dd");
+                  const isImg = isImageUrl(msg.content);
+                  const isLocalPreview = msg.content.startsWith("blob:");
                   return (
                     <div key={msg.id}>
                       {showDateSep && (
@@ -314,16 +361,32 @@ export default function MessagesPage() {
                         </div>
                       )}
                       <div className={cn("flex", isMe ? "justify-end" : "justify-start")}>
-                        <div
-                          className={cn(
-                            "max-w-xs px-3 py-2 rounded-2xl text-sm",
-                            isMe
-                              ? "bg-primary text-white rounded-br-sm"
-                              : "bg-muted text-foreground rounded-bl-sm",
+                        <div className={cn("max-w-xs", !isImg && !isLocalPreview && "px-3 py-2 rounded-2xl text-sm",
+                          !isImg && !isLocalPreview && (isMe ? "bg-primary text-white rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"))}>
+                          {isImg ? (
+                            <a href={`${BASE_URL}${msg.content}`} target="_blank" rel="noreferrer">
+                              <img
+                                src={`${BASE_URL}${msg.content}`}
+                                alt="shared image"
+                                className="rounded-xl max-w-60 max-h-75 object-cover border border-border"
+                              />
+                            </a>
+                          ) : isLocalPreview ? (
+                            <div className="relative">
+                              <img
+                                src={msg.content}
+                                alt="uploading…"
+                                className="rounded-xl max-w-60 max-h-75 object-cover border border-border opacity-60"
+                              />
+                              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/20">
+                                <span className="text-white text-xs font-medium">Uploading…</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap wrap-break-word">{msg.content}</p>
                           )}
-                        >
-                          <p>{msg.content}</p>
-                          <p className={cn("text-xs mt-1", isMe ? "text-white/60" : "text-muted-foreground")}>
+                          <p className={cn("text-xs mt-1",
+                            isImg || isLocalPreview ? "text-muted-foreground text-right" : (isMe ? "text-white/60" : "text-muted-foreground"))}>
                             {format(msgDate, "h:mm a")}
                           </p>
                         </div>
@@ -334,19 +397,61 @@ export default function MessagesPage() {
                 <div ref={bottomRef} />
               </div>
 
+              {/* Image preview strip */}
+              {pendingImage && (
+                <div className="px-4 py-2 border-t border-border bg-muted/20">
+                  <div className="relative inline-block">
+                    <img
+                      src={pendingImage.preview}
+                      alt="attachment preview"
+                      className="h-20 w-20 object-cover rounded-lg border border-border"
+                    />
+                    <button
+                      onClick={removePendingImage}
+                      className="absolute -top-1.5 -right-1.5 bg-foreground text-background rounded-full h-4 w-4 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Image ready to send — add a caption or press send</p>
+                </div>
+              )}
+
               {/* Input */}
               <form
                 onSubmit={sendMessage}
-                className="px-4 py-3 border-t border-border flex gap-2"
+                className="px-4 py-3 border-t border-border flex gap-2 items-center"
               >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onImagePick}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending}
+                  title="Attach image"
+                >
+                  <ImagePlus className="h-5 w-5" />
+                </Button>
                 <Input
                   value={msgInput}
                   onChange={(e) => setMsgInput(e.target.value)}
-                  placeholder="Type a message…"
+                  placeholder={pendingImage ? "Add a caption (optional)…" : "Type a message…"}
                   className="flex-1"
                   disabled={sending}
                 />
-                <Button type="submit" size="icon" disabled={sending || !msgInput.trim()}>
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={sending || (!msgInput.trim() && !pendingImage)}
+                >
                   <Send className="h-4 w-4" />
                 </Button>
               </form>

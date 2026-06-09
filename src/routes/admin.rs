@@ -1,5 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::administrator::require_admin;
+use crate::utils::notifications::notify_best_effort;
 use bigdecimal::BigDecimal;
 use axum::{
     Json, Router,
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
 use validator::Validate;
+use chrono::{Utc, Duration};
 
 pub fn admin_routes(pool: PgPool) -> Router {
     Router::new()
@@ -29,6 +31,8 @@ pub fn admin_routes(pool: PgPool) -> Router {
         .route("/payouts/:id/reject", post(reject_payout))
         .route("/disputes", get(list_disputes))
         .route("/disputes/:id/resolve", post(resolve_dispute))
+        .route("/suspend/:entity_type/:entity_id", post(suspend_entity))
+        .route("/unsuspend/:entity_type/:entity_id", post(unsuspend_entity))
         .route("/dashboard", get(platform_dashboard))
         .layer(axum::middleware::from_fn_with_state(pool.clone(), require_admin))
         .with_state(pool)
@@ -277,7 +281,7 @@ pub async fn flag_content(
 
 #[derive(serde::Deserialize, Debug)]
 pub struct ResolveFlagPayload {
-    pub flag_id: i32,
+    pub review_id: i32,
 }
 
 pub async fn resolve_flag(
@@ -285,17 +289,17 @@ pub async fn resolve_flag(
     Json(payload): Json<ResolveFlagPayload>,
 ) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
     let updated = sqlx::query!(
-        "UPDATE content_flags SET resolved = TRUE WHERE id = $1 AND resolved = FALSE",
-        payload.flag_id
+        "UPDATE content_flags SET resolved = TRUE WHERE target_type = 'review' AND target_id = $1 AND resolved = FALSE",
+        payload.review_id
     )
     .execute(&pool)
     .await?;
 
     if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound("Flag not found or already resolved".to_string()));
+        return Err(AppError::NotFound("No active flags found for this review".to_string()));
     }
 
-    Ok((StatusCode::OK, Json(json!({ "message": "Flag resolved successfully" }))))
+    Ok((StatusCode::OK, Json(json!({ "message": "All flags on review resolved" }))))
 }
 
 #[derive(serde::Serialize, sqlx::FromRow, Debug)]
@@ -532,14 +536,16 @@ pub struct DisputeRow {
     pub booking_id: i32,
     pub client_id: i32,
     pub client_username: String,
+    pub service_owner_user_id: Option<i32>,
     pub target_type: String,
     pub target_id: i32,
     pub provider_name: Option<String>,
     pub service_description: Option<String>,
     pub scheduled_time: chrono::NaiveDateTime,
     pub dispute_reason: Option<String>,
+    pub dispute_response: Option<String>,
     pub admin_resolution: Option<String>,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: Option<chrono::NaiveDateTime>,
 }
 
 pub async fn list_disputes(
@@ -548,15 +554,17 @@ pub async fn list_disputes(
     let disputes = sqlx::query_as!(
         DisputeRow,
         r#"SELECT
-               b.id                 AS booking_id,
+               b.id                                         AS booking_id,
                b.client_id,
-               u.username           AS client_username,
+               u.username                                   AS client_username,
+               COALESCE(p.user_id, biz.user_id)            AS service_owner_user_id,
                b.target_type,
                b.target_id,
                COALESCE(p.service_name, biz.business_name) AS provider_name,
                b.service_description,
                b.scheduled_time,
                b.dispute_reason,
+               b.dispute_response,
                b.admin_resolution,
                b.created_at
            FROM bookings b
@@ -590,7 +598,21 @@ pub async fn resolve_dispute(
         ));
     }
 
-    let updated = sqlx::query!(
+    // Fetch booking parties before updating
+    let booking = sqlx::query!(
+        r#"SELECT b.client_id,
+                  COALESCE(p.user_id, biz.user_id) AS service_owner_user_id
+           FROM bookings b
+           LEFT JOIN providers   p   ON b.target_type = 'provider'  AND b.target_id = p.id
+           LEFT JOIN businesses  biz ON b.target_type = 'business' AND b.target_id = biz.id
+           WHERE b.id = $1 AND b.status = 'disputed'"#,
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Disputed booking not found or already resolved".to_string()))?;
+
+    sqlx::query!(
         r#"UPDATE bookings
            SET status = $1, admin_resolution = $2, updated_at = NOW()
            WHERE id = $3 AND status = 'disputed'"#,
@@ -601,11 +623,151 @@ pub async fn resolve_dispute(
     .execute(&pool)
     .await?;
 
-    if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound(
-            "Disputed booking not found or already resolved".to_string(),
-        ));
+    let note_snippet = payload.note.as_deref().unwrap_or("No additional notes.");
+    let client_title = if resolution == "completed" {
+        "Dispute resolved — booking completed"
+    } else {
+        "Dispute resolved — booking cancelled"
+    };
+    let provider_title = if resolution == "completed" {
+        "Dispute resolved in your favour"
+    } else {
+        "Dispute resolved — booking cancelled"
+    };
+    let client_body = format!(
+        "Admin has resolved the dispute on booking #{id} as {resolution}. Admin note: {note_snippet}"
+    );
+    let provider_body = format!(
+        "Admin has resolved the dispute on booking #{id} as {resolution}. Admin note: {note_snippet}"
+    );
+
+    // Notify client
+    notify_best_effort(&pool, booking.client_id, "dispute_resolved", client_title, &client_body, Some("booking"), Some(id)).await;
+
+    // Notify service owner if known
+    if let Some(owner_id) = booking.service_owner_user_id {
+        notify_best_effort(&pool, owner_id, "dispute_resolved", provider_title, &provider_body, Some("booking"), Some(id)).await;
     }
 
     Ok((StatusCode::OK, Json(json!({ "message": format!("Booking marked as {resolution}") }))))
+}
+
+// ── Provider / business suspension ───────────────────────────────────────────
+
+#[derive(Deserialize, Debug)]
+pub struct SuspendPayload {
+    /// Number of days. 0 = permanent (99 years). None = lift suspension.
+    pub days: i64,
+}
+
+pub async fn suspend_entity(
+    State(pool): State<PgPool>,
+    Path((entity_type, entity_id)): Path<(String, i32)>,
+    Json(payload): Json<SuspendPayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let suspended_until = if payload.days == 0 {
+        Utc::now() + Duration::days(365 * 99)
+    } else {
+        Utc::now() + Duration::days(payload.days)
+    };
+
+    match entity_type.as_str() {
+        "provider" => {
+            let updated = sqlx::query!(
+                "UPDATE providers SET suspended_until = $1 WHERE id = $2",
+                suspended_until,
+                entity_id,
+            )
+            .execute(&pool)
+            .await?;
+            if updated.rows_affected() == 0 {
+                return Err(AppError::NotFound("Provider not found".to_string()));
+            }
+            // Notify the provider's user
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM providers WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                let label = if payload.days == 0 { "indefinitely".to_string() } else { format!("for {} day(s)", payload.days) };
+                notify_best_effort(
+                    &pool, user_id, "account_suspended",
+                    "Account suspended",
+                    &format!("Your provider account has been suspended {label} by an admin. You cannot accept new bookings during this period."),
+                    Some("provider"), Some(entity_id),
+                ).await;
+            }
+        }
+        "business" => {
+            let updated = sqlx::query!(
+                "UPDATE businesses SET suspended_until = $1 WHERE id = $2",
+                suspended_until,
+                entity_id,
+            )
+            .execute(&pool)
+            .await?;
+            if updated.rows_affected() == 0 {
+                return Err(AppError::NotFound("Business not found".to_string()));
+            }
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM businesses WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                let label = if payload.days == 0 { "indefinitely".to_string() } else { format!("for {} day(s)", payload.days) };
+                notify_best_effort(
+                    &pool, user_id, "account_suspended",
+                    "Account suspended",
+                    &format!("Your business account has been suspended {label} by an admin. You cannot accept new bookings during this period."),
+                    Some("business"), Some(entity_id),
+                ).await;
+            }
+        }
+        _ => return Err(AppError::BadRequest("entity_type must be 'provider' or 'business'".to_string())),
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Suspended successfully" }))))
+}
+
+pub async fn unsuspend_entity(
+    State(pool): State<PgPool>,
+    Path((entity_type, entity_id)): Path<(String, i32)>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    match entity_type.as_str() {
+        "provider" => {
+            sqlx::query!(
+                "UPDATE providers SET suspended_until = NULL WHERE id = $1",
+                entity_id,
+            )
+            .execute(&pool)
+            .await?;
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM providers WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                notify_best_effort(
+                    &pool, user_id, "account_unsuspended",
+                    "Account suspension lifted",
+                    "Your provider account suspension has been lifted. You can now receive new bookings.",
+                    Some("provider"), Some(entity_id),
+                ).await;
+            }
+        }
+        "business" => {
+            sqlx::query!(
+                "UPDATE businesses SET suspended_until = NULL WHERE id = $1",
+                entity_id,
+            )
+            .execute(&pool)
+            .await?;
+            if let Some(user_id) = sqlx::query_scalar!(
+                "SELECT user_id FROM businesses WHERE id = $1", entity_id
+            ).fetch_optional(&pool).await? {
+                notify_best_effort(
+                    &pool, user_id, "account_unsuspended",
+                    "Account suspension lifted",
+                    "Your business account suspension has been lifted. You can now receive new bookings.",
+                    Some("business"), Some(entity_id),
+                ).await;
+            }
+        }
+        _ => return Err(AppError::BadRequest("entity_type must be 'provider' or 'business'".to_string())),
+    }
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Suspension lifted" }))))
 }

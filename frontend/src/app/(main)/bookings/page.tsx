@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
-import { api, type Booking, type BookingReceived, type DashboardData } from "@/lib/api";
+import { api, type Booking, type BookingReceived, type DashboardData, ApiError } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { CalendarCheck, MapPin, Clock, User, MessageCircle, CheckCircle2, AlertTriangle, Star } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CalendarCheck, MapPin, Clock, User, MessageCircle, CheckCircle2, AlertTriangle, Star, ImagePlus, X, Smartphone, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 
@@ -57,6 +58,23 @@ export default function BookingsPage() {
   // Dispute dialog (client)
   const [disputeTarget, setDisputeTarget] = useState<ActionTarget | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
+
+  // Dispute response dialog (provider/business)
+  const [disputeResponseTarget, setDisputeResponseTarget] = useState<ActionTarget | null>(null);
+  const [disputeResponseText, setDisputeResponseText] = useState("");
+  const [disputeResponseSending, setDisputeResponseSending] = useState(false);
+
+  // Evidence upload dialog
+  const [evidenceTarget, setEvidenceTarget] = useState<ActionTarget | null>(null);
+  const [evidenceFiles, setEvidenceFiles] = useState<{ file: File; caption: string; preview: string }[]>([]);
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
+
+  // M-Pesa payment dialog (client)
+  const [payTarget, setPayTarget] = useState<{ bookingId: number; label: string } | null>(null);
+  const [payPhone, setPayPhone] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+  const [payStatus, setPayStatus] = useState<"idle" | "sending" | "polling" | "done" | "failed">("idle");
+  const [payMessage, setPayMessage] = useState("");
 
   // Message client dialog (provider)
   const [msgTarget, setMsgTarget] = useState<MessageTarget | null>(null);
@@ -160,6 +178,52 @@ export default function BookingsPage() {
     await updateStatus(id, "completed");
   }
 
+  async function submitDisputeResponse() {
+    if (!disputeResponseTarget || !disputeResponseText.trim()) return;
+    setDisputeResponseSending(true);
+    try {
+      await api.bookings.submitDisputeResponse(disputeResponseTarget.id, disputeResponseText.trim(), token!);
+      toast.success("Response submitted — the admin will review and mediate.");
+      setDisputeResponseTarget(null);
+      setDisputeResponseText("");
+      loadBookings();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit response");
+    } finally {
+      setDisputeResponseSending(false);
+    }
+  }
+
+  function addEvidenceFiles(files: FileList | null) {
+    if (!files) return;
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/heic"];
+    const newFiles = Array.from(files)
+      .filter((f) => allowed.includes(f.type))
+      .slice(0, 5 - evidenceFiles.length)
+      .map((file) => ({ file, caption: "", preview: URL.createObjectURL(file) }));
+    setEvidenceFiles((prev) => [...prev, ...newFiles].slice(0, 5));
+  }
+
+  async function uploadEvidence() {
+    if (!evidenceTarget || evidenceFiles.length === 0 || !token) return;
+    setEvidenceUploading(true);
+    let uploaded = 0;
+    for (const { file, caption } of evidenceFiles) {
+      try {
+        await api.bookings.uploadEvidence(evidenceTarget.id, file, caption, token);
+        uploaded++;
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.message : "Upload failed";
+        toast.error(`Failed to upload ${file.name}: ${msg}`);
+      }
+    }
+    if (uploaded > 0) toast.success(`${uploaded} image${uploaded > 1 ? "s" : ""} uploaded as evidence`);
+    setEvidenceTarget(null);
+    evidenceFiles.forEach((f) => URL.revokeObjectURL(f.preview));
+    setEvidenceFiles([]);
+    setEvidenceUploading(false);
+  }
+
   async function sendMessage() {
     if (!msgTarget || !msgText.trim()) return;
     setMsgSending(true);
@@ -198,6 +262,44 @@ export default function BookingsPage() {
     }
   }
 
+  async function initiatePayment() {
+    if (!payTarget || !payPhone.trim() || !payAmount || !token) return;
+    const amount = parseFloat(payAmount);
+    if (isNaN(amount) || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    setPayStatus("sending");
+    setPayMessage("Sending M-Pesa prompt to your phone…");
+    try {
+      await api.payments.initiate({ booking_id: payTarget.bookingId, phone_number: payPhone.trim(), amount }, token);
+      setPayStatus("polling");
+      setPayMessage("Check your phone — enter your M-Pesa PIN to complete payment.");
+      // Poll for up to 90 seconds
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts++;
+        try {
+          const r = await api.payments.status(payTarget.bookingId, token!) as { payment: { status: string; transaction_id?: string } };
+          if (r.payment.status === "completed") {
+            clearInterval(interval);
+            setPayStatus("done");
+            setPayMessage(`Payment confirmed! M-Pesa receipt: ${r.payment.transaction_id ?? "N/A"}`);
+            loadBookings();
+          } else if (r.payment.status === "failed" || r.payment.status === "cancelled") {
+            clearInterval(interval);
+            setPayStatus("failed");
+            setPayMessage("Payment failed or was cancelled. You can try again.");
+          } else if (attempts >= 18) {
+            clearInterval(interval);
+            setPayStatus("failed");
+            setPayMessage("Payment timed out. Check M-Pesa messages and try again if needed.");
+          }
+        } catch { /* ignore poll errors */ }
+      }, 5000);
+    } catch (e: unknown) {
+      setPayStatus("failed");
+      setPayMessage(e instanceof Error ? e.message : "Failed to initiate payment");
+    }
+  }
+
   const TABS = ["all", "pending", "confirmed", "pending_confirmation", "completed", "cancelled", "disputed"];
   const TAB_LABELS: Record<string, string> = { pending_confirmation: "Awaiting" };
 
@@ -233,16 +335,54 @@ export default function BookingsPage() {
           </div>
         );
       }
+      if (booking.status === "disputed") {
+        const alreadyResponded = !!(booking as Booking).dispute_response;
+        return (
+          <div className="flex gap-2 flex-wrap justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={alreadyResponded}
+              className="text-amber-700 border-amber-200 hover:bg-amber-50"
+              onClick={() => { setDisputeResponseText(""); setDisputeResponseTarget({ id: booking.id, label: `Booking #${booking.id}` }); }}
+            >
+              {alreadyResponded ? "Response submitted" : "Respond to dispute"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => { setEvidenceFiles([]); setEvidenceTarget({ id: booking.id, label: `Booking #${booking.id}` }); }}
+            >
+              <ImagePlus className="h-3.5 w-3.5" />Add evidence
+            </Button>
+          </div>
+        );
+      }
       return null;
     }
 
     // Client side
     if (booking.status === "pending") {
       return (
-        <Button size="sm" variant="outline" disabled={busy}
-          className="shrink-0 text-destructive hover:text-destructive"
-          onClick={() => { setCancelReason(""); setCancelTarget({ id: booking.id, label: `Booking #${booking.id}` }); }}>
-          Cancel
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => { setPayPhone(""); setPayAmount(""); setPayStatus("idle"); setPayMessage(""); setPayTarget({ bookingId: booking.id, label: `Booking #${booking.id}` }); }}>
+            <Smartphone className="h-3.5 w-3.5" />Pay via M-Pesa
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy}
+            className="text-destructive hover:text-destructive"
+            onClick={() => { setCancelReason(""); setCancelTarget({ id: booking.id, label: `Booking #${booking.id}` }); }}>
+            Cancel
+          </Button>
+        </div>
+      );
+    }
+    if (booking.status === "confirmed") {
+      return (
+        <Button size="sm" className="gap-1.5 shrink-0 bg-green-600 hover:bg-green-700 text-white"
+          onClick={() => { setPayPhone(""); setPayAmount(""); setPayStatus("idle"); setPayMessage(""); setPayTarget({ bookingId: booking.id, label: `Booking #${booking.id}` }); }}>
+          <Smartphone className="h-3.5 w-3.5" />Pay via M-Pesa
         </Button>
       );
     }
@@ -259,6 +399,18 @@ export default function BookingsPage() {
             <AlertTriangle className="h-3.5 w-3.5" />Dispute
           </Button>
         </div>
+      );
+    }
+    if (booking.status === "disputed") {
+      return (
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0 gap-1.5"
+          onClick={() => { setEvidenceFiles([]); setEvidenceTarget({ id: booking.id, label: `Booking #${booking.id}` }); }}
+        >
+          <ImagePlus className="h-3.5 w-3.5" />Add evidence
+        </Button>
       );
     }
     if (booking.status === "completed" && !reviewedBookings.has(booking.id)) {
@@ -433,6 +585,102 @@ export default function BookingsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Respond to dispute (provider/business) */}
+      <Dialog open={!!disputeResponseTarget} onOpenChange={(open) => !open && setDisputeResponseTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Respond to dispute</DialogTitle>
+            <DialogDescription>
+              {disputeResponseTarget?.label} — provide your side of the story. The admin will review both accounts before making a decision.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label>Your response <span className="text-destructive">*</span></Label>
+              <Textarea
+                placeholder="e.g. I completed all the agreed work. The client was present and did not raise any concerns during the job."
+                rows={5}
+                value={disputeResponseText}
+                onChange={(e) => setDisputeResponseText(e.target.value)}
+                className="resize-none"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setDisputeResponseTarget(null)}>Cancel</Button>
+              <Button
+                disabled={!disputeResponseText.trim() || disputeResponseSending}
+                onClick={submitDisputeResponse}
+              >
+                {disputeResponseSending ? "Submitting…" : "Submit response"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Evidence upload dialog */}
+      <Dialog open={!!evidenceTarget} onOpenChange={(open) => { if (!open) { evidenceFiles.forEach(f => URL.revokeObjectURL(f.preview)); setEvidenceFiles([]); setEvidenceTarget(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upload evidence</DialogTitle>
+            <DialogDescription>
+              {evidenceTarget?.label} — add up to 5 photos to support your case. The admin will review all evidence from both parties.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            {/* File picker */}
+            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl p-6 cursor-pointer hover:bg-muted/40 transition-colors">
+              <ImagePlus className="h-7 w-7 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Click to add photos ({evidenceFiles.length}/5)</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                disabled={evidenceFiles.length >= 5}
+                onChange={(e) => addEvidenceFiles(e.target.files)}
+              />
+            </label>
+            {/* Previews */}
+            {evidenceFiles.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">
+                {evidenceFiles.map((ef, i) => (
+                  <div key={i} className="relative group">
+                    <img src={ef.preview} alt="" className="w-full h-24 object-cover rounded-lg border border-border" />
+                    <button
+                      className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => {
+                        URL.revokeObjectURL(ef.preview);
+                        setEvidenceFiles((prev) => prev.filter((_, idx) => idx !== i));
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                    <input
+                      className="mt-1 w-full text-xs border border-border rounded px-1.5 py-1 bg-background"
+                      placeholder="Caption…"
+                      value={ef.caption}
+                      onChange={(e) => setEvidenceFiles((prev) => prev.map((x, idx) => idx === i ? { ...x, caption: e.target.value } : x))}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { evidenceFiles.forEach(f => URL.revokeObjectURL(f.preview)); setEvidenceFiles([]); setEvidenceTarget(null); }}>
+                Cancel
+              </Button>
+              <Button
+                disabled={evidenceFiles.length === 0 || evidenceUploading}
+                onClick={uploadEvidence}
+              >
+                {evidenceUploading ? "Uploading…" : `Upload ${evidenceFiles.length} image${evidenceFiles.length !== 1 ? "s" : ""}`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Leave a review (client, completed) */}
       <Dialog open={!!reviewTarget} onOpenChange={(open) => !open && setReviewTarget(null)}>
         <DialogContent className="max-w-sm">
@@ -485,6 +733,85 @@ export default function BookingsPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* M-Pesa payment dialog */}
+      <Dialog open={!!payTarget} onOpenChange={(open) => { if (!open && payStatus !== "sending" && payStatus !== "polling") setPayTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Smartphone className="h-5 w-5 text-green-600" />Pay via M-Pesa
+            </DialogTitle>
+            <DialogDescription>{payTarget?.label}</DialogDescription>
+          </DialogHeader>
+
+          {payStatus === "idle" && (
+            <div className="space-y-4 pt-1">
+              <div className="space-y-1.5">
+                <Label>M-Pesa phone number <span className="text-destructive">*</span></Label>
+                <Input
+                  type="tel"
+                  placeholder="07XX XXX XXX or 2547XX..."
+                  value={payPhone}
+                  onChange={(e) => setPayPhone(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Amount (KES) <span className="text-destructive">*</span></Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 1500"
+                  min="1"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                You will receive a PIN prompt on your phone. The provider&apos;s wallet is credited only after payment is confirmed by Safaricom.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setPayTarget(null)}>Cancel</Button>
+                <Button
+                  className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
+                  disabled={!payPhone.trim() || !payAmount}
+                  onClick={initiatePayment}
+                >
+                  <Smartphone className="h-4 w-4" />Send M-Pesa prompt
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {(payStatus === "sending" || payStatus === "polling") && (
+            <div className="py-6 flex flex-col items-center gap-4 text-center">
+              <Loader2 className="h-10 w-10 text-green-600 animate-spin" />
+              <p className="text-sm font-medium text-foreground">{payMessage}</p>
+              {payStatus === "polling" && (
+                <p className="text-xs text-muted-foreground">Waiting for Safaricom confirmation… this can take up to 90 seconds.</p>
+              )}
+            </div>
+          )}
+
+          {payStatus === "done" && (
+            <div className="py-6 flex flex-col items-center gap-3 text-center">
+              <CheckCircle2 className="h-12 w-12 text-green-600" />
+              <p className="text-sm font-semibold text-green-700">Payment successful!</p>
+              <p className="text-xs text-muted-foreground">{payMessage}</p>
+              <Button className="mt-2" onClick={() => setPayTarget(null)}>Close</Button>
+            </div>
+          )}
+
+          {payStatus === "failed" && (
+            <div className="py-4 flex flex-col items-center gap-3 text-center">
+              <AlertTriangle className="h-10 w-10 text-destructive" />
+              <p className="text-sm text-destructive font-medium">{payMessage}</p>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setPayTarget(null)}>Close</Button>
+                <Button onClick={() => { setPayStatus("idle"); setPayMessage(""); }}>Try again</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

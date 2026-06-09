@@ -1,10 +1,12 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
 use crate::utils::notifications::notify_best_effort;
+use crate::utils::image_upload::parse_image_from_multipart;
+use crate::utils::storage::{SharedStorage, generate_key};
 use crate::utils::ws_state::{WsConnections, push_to_user};
 use axum::{
     Extension, Json, Router,
-    extract::{Query, State},
+    extract::{Multipart, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -20,6 +22,7 @@ pub fn messages_routes(pool: PgPool) -> Router {
         .route("/markMessagesAsRead", post(mark_messages_as_read))
         .route("/unreadMessagesCount", get(get_unread_messages_count))
         .route("/conversations", get(get_conversations))
+        .route("/upload", post(upload_message_attachment))
         .with_state(pool)
 }
 
@@ -269,4 +272,18 @@ pub async fn get_conversations(
     .await?;
 
     Ok((StatusCode::OK, Json(json!({ "conversations": conversations }))))
+}
+
+// ── Upload message attachment ─────────────────────────────────────────────────
+
+pub async fn upload_message_attachment(
+    State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
+    CurrentUser { user_id: _ }: CurrentUser,
+    multipart: Multipart,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let (data, ext, _ct) = parse_image_from_multipart(multipart).await?;
+    let key = generate_key("messages/attachments", &ext);
+    let url = storage.save(&key, &data).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "url": url }))))
 }

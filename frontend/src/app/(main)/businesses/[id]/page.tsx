@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Star, MapPin, Phone, Globe, MessageCircle,
-  CheckCircle, Clock, Building2, Heart,
+  CheckCircle, Clock, Building2, Heart, Flag,
 } from "lucide-react";
 import PostsSection from "@/components/PostsSection";
 import { toast } from "sonner";
@@ -34,6 +34,9 @@ export default function BusinessProfilePage() {
   const [loading, setLoading] = useState(true);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favLoading, setFavLoading] = useState(false);
+  const [flagTarget, setFlagTarget] = useState<number | null>(null);
+  const [flagReason, setFlagReason] = useState("");
+  const [flagSending, setFlagSending] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
@@ -329,6 +332,15 @@ export default function BusinessProfilePage() {
                     <span className="text-xs text-muted-foreground ml-auto">
                       {format(new Date(r.created_at), "d MMM yyyy")}
                     </span>
+                    {isAuthenticated && (
+                      <button
+                        className="text-muted-foreground/40 hover:text-red-500 transition-colors"
+                        title="Report review"
+                        onClick={() => { setFlagReason(""); setFlagTarget(r.id); }}
+                      >
+                        <Flag className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                   <p className="text-sm text-foreground">{r.comment}</p>
                 </div>
@@ -377,6 +389,44 @@ export default function BusinessProfilePage() {
             </div>
             <Button className="w-full" onClick={submitBooking} disabled={bookingLoading}>
               {bookingLoading ? "Submitting…" : "Confirm booking"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Flag review dialog */}
+      <Dialog open={flagTarget !== null} onOpenChange={(o) => !o && setFlagTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flag className="h-4 w-4 text-red-500" />Report review
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">Tell us why this review is inappropriate. Our team will investigate.</p>
+          </DialogHeader>
+          <Textarea
+            rows={3}
+            placeholder="e.g. Fake review, offensive language, spam…"
+            value={flagReason}
+            onChange={(e) => setFlagReason(e.target.value)}
+          />
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setFlagTarget(null)} disabled={flagSending}>Cancel</Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={!flagReason.trim() || flagSending}
+              onClick={async () => {
+                if (!flagTarget || !token) return;
+                setFlagSending(true);
+                try {
+                  await api.reviews.flag(flagTarget, flagReason.trim(), token);
+                  toast.success("Review reported — thanks for helping keep the platform safe");
+                  setFlagTarget(null); setFlagReason("");
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : "Failed to report review");
+                } finally { setFlagSending(false); }
+              }}
+            >
+              {flagSending ? "Reporting…" : "Submit report"}
             </Button>
           </div>
         </DialogContent>

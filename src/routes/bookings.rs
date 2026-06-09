@@ -4,10 +4,11 @@ use crate::utils::email::{EmailConfig, booking_confirmation_html, send_email};
 use crate::utils::notifications::{notify_and_push, notify_target_owner_and_push};
 use crate::utils::sms::{SmsConfig, booking_confirmation_sms, booking_cancelled_sms,
                         new_booking_received_sms, send_sms_best_effort};
+use crate::utils::storage::{SharedStorage, generate_key};
 use crate::utils::ws_state::WsConnections;
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -25,6 +26,9 @@ pub fn booking_routes(pool: PgPool) -> Router {
         .route("/:id/status", post(update_booking))
         .route("/:id/delete", post(delete_booking))
         .route("/:id/reschedule", post(reschedule_booking))
+        .route("/:id/dispute_response", post(submit_dispute_response))
+        .route("/:id/evidence", post(upload_dispute_evidence))
+        .route("/:id/evidence", get(get_dispute_evidence))
         .with_state(pool)
 }
 
@@ -47,6 +51,10 @@ pub struct Booking {
     pub client_longitude: Option<f64>,
     pub client_phone: Option<String>,
     pub cancel_reason: Option<String>,
+    pub dispute_reason: Option<String>,
+    pub dispute_response: Option<String>,
+    pub admin_resolution: Option<String>,
+    pub reminder_sent: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -93,6 +101,24 @@ pub async fn create_booking(
 
     if target_exists.is_none() {
         return Err(AppError::BadRequest("Target ID does not exist".to_string()));
+    }
+
+    // Check if provider/business is currently suspended
+    let is_suspended = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT 1 FROM providers WHERE id = $1 AND suspended_until IS NOT NULL AND suspended_until > NOW()",
+            target_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT 1 FROM businesses WHERE id = $1 AND suspended_until IS NOT NULL AND suspended_until > NOW()",
+            target_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+    if is_suspended {
+        return Err(AppError::BadRequest(
+            "This provider is currently suspended and cannot accept new bookings.".to_string(),
+        ));
     }
 
     if payload.scheduled_time < chrono::Local::now().naive_local() {
@@ -616,4 +642,233 @@ pub async fn reschedule_booking(
     .await?;
 
     Ok((StatusCode::OK, Json(json!({ "message": "Booking rescheduled successfully" }))))
+}
+
+// ── Dispute response (provider/business submits their side) ──────────────────
+
+#[derive(Deserialize, Debug)]
+pub struct DisputeResponsePayload {
+    pub response: String,
+}
+
+pub async fn submit_dispute_response(
+    State(pool): State<PgPool>,
+    Extension(ws_conns): Extension<WsConnections>,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+    Json(payload): Json<DisputeResponsePayload>,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    if payload.response.trim().is_empty() {
+        return Err(AppError::BadRequest("Response cannot be empty".to_string()));
+    }
+
+    let booking = sqlx::query!(
+        "SELECT target_type, target_id, client_id, status FROM bookings WHERE id = $1",
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
+
+    if booking.status != "disputed" {
+        return Err(AppError::BadRequest("This booking is not in disputed status".to_string()));
+    }
+
+    let target_type = booking.target_type.to_lowercase();
+    let is_service_owner = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !is_service_owner {
+        return Err(AppError::Forbidden("Only the service provider can submit a dispute response".to_string()));
+    }
+
+    sqlx::query!(
+        "UPDATE bookings SET dispute_response = $1 WHERE id = $2",
+        payload.response.trim(),
+        id
+    )
+    .execute(&pool)
+    .await?;
+
+    // Notify the client that the provider has responded
+    use crate::utils::notifications::notify_and_push;
+    notify_and_push(
+        &pool,
+        &ws_conns,
+        booking.client_id,
+        "dispute_response",
+        "Provider responded to your dispute",
+        &format!("The provider has submitted their response to the dispute on booking #{}. An admin will review and mediate.", id),
+        Some("booking"),
+        Some(id),
+    ).await;
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Dispute response submitted" }))))
+}
+
+// ── Dispute evidence upload ────────────────────────────────────────────────────
+
+pub async fn upload_dispute_evidence(
+    State(pool): State<PgPool>,
+    Extension(storage): Extension<SharedStorage>,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+    mut multipart: Multipart,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    let booking = sqlx::query!(
+        "SELECT target_type, target_id, client_id, status FROM bookings WHERE id = $1",
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
+
+    if booking.status != "disputed" {
+        return Err(AppError::BadRequest("Evidence can only be submitted for disputed bookings".to_string()));
+    }
+
+    let is_client = booking.client_id == user_id;
+    let target_type = booking.target_type.to_lowercase();
+    let is_service_owner = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+
+    if !is_client && !is_service_owner {
+        return Err(AppError::Forbidden("Only the client or service provider can submit evidence".to_string()));
+    }
+
+    let uploader_role = if is_client { "client" } else { "provider" };
+
+    // Parse multipart: collect file bytes and optional caption text field
+    let mut file_data: Option<bytes::Bytes> = None;
+    let mut file_ext = "jpg".to_string();
+    let mut caption: Option<String> = None;
+
+    while let Some(field) = multipart.next_field().await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "caption" {
+            let text = field.text().await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?;
+            if !text.trim().is_empty() { caption = Some(text.trim().to_string()); }
+        } else {
+            // treat as the image file
+            let file_name = field.file_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "upload.jpg".to_string());
+            file_ext = std::path::Path::new(&file_name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("jpg")
+                .to_lowercase();
+            let data = field.bytes().await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?;
+            if !data.is_empty() { file_data = Some(data); }
+        }
+    }
+
+    let data = file_data.ok_or_else(|| AppError::BadRequest("No image uploaded".to_string()))?;
+
+    // Limit: max 5 evidence images per party per booking
+    let count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM dispute_evidence WHERE booking_id = $1 AND uploaded_by = $2",
+        id, user_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .unwrap_or(0);
+
+    if count >= 5 {
+        return Err(AppError::BadRequest("Maximum 5 evidence images per party".to_string()));
+    }
+
+    let key = generate_key("disputes/evidence", &file_ext);
+    let url = storage.save(&key, &data).await
+        .map_err(|e| { let _ = tokio::spawn(async move {}); e })?;
+
+    sqlx::query!(
+        r#"INSERT INTO dispute_evidence (booking_id, uploaded_by, uploader_role, file_url, caption)
+           VALUES ($1, $2, $3, $4, $5)"#,
+        id, user_id, uploader_role, url, caption.as_deref()
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "url": url, "message": "Evidence uploaded" }))))
+}
+
+pub async fn get_dispute_evidence(
+    State(pool): State<PgPool>,
+    Path(id): Path<i32>,
+    CurrentUser { user_id }: CurrentUser,
+) -> AppResult<(StatusCode, Json<serde_json::Value>)> {
+    // Verify the requester is a party to this booking or an admin
+    let booking = sqlx::query!(
+        "SELECT target_type, target_id, client_id FROM bookings WHERE id = $1", id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found".to_string()))?;
+
+    let is_client = booking.client_id == user_id;
+    let target_type = booking.target_type.to_lowercase();
+    let is_service_owner = match target_type.as_str() {
+        "provider" => sqlx::query_scalar!(
+            "SELECT id FROM providers WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        "business" => sqlx::query_scalar!(
+            "SELECT id FROM businesses WHERE id = $1 AND user_id = $2",
+            booking.target_id, user_id
+        ).fetch_optional(&pool).await?.is_some(),
+        _ => false,
+    };
+    let is_admin = sqlx::query_scalar!(
+        "SELECT is_super_admin FROM admins WHERE user_id = $1", user_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .flatten()
+    .unwrap_or(false);
+
+    if !is_client && !is_service_owner && !is_admin {
+        return Err(AppError::Forbidden("Access denied".to_string()));
+    }
+
+    #[derive(Serialize, sqlx::FromRow)]
+    struct EvidenceRow {
+        id: i32,
+        uploader_role: String,
+        file_url: String,
+        caption: Option<String>,
+        created_at: Option<chrono::NaiveDateTime>,
+    }
+
+    let evidence = sqlx::query_as!(
+        EvidenceRow,
+        "SELECT id, uploader_role, file_url, caption, created_at FROM dispute_evidence WHERE booking_id = $1 ORDER BY created_at ASC",
+        id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({ "evidence": evidence }))))
 }
