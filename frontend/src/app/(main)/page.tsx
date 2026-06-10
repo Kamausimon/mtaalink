@@ -134,7 +134,7 @@ export default function LandingPage() {
       <section className="bg-white border-t border-b border-border py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="text-2xl font-bold text-foreground mb-2">
-            How MtaaLink works
+            How Sokavi works
           </h2>
           <p className="text-muted-foreground mb-10">
             From search to payment in three steps.
@@ -161,7 +161,7 @@ export default function LandingPage() {
       <section className="bg-background py-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="text-2xl font-bold text-foreground mb-10">
-            Why clients trust MtaaLink
+            Why clients trust Sokavi
           </h2>
           <div className="grid sm:grid-cols-2 gap-6">
             {TRUST_POINTS.map((point) => (
@@ -192,7 +192,7 @@ export default function LandingPage() {
               Are you a service provider?
             </h2>
             <p className="text-primary-foreground/80 text-sm">
-              Join MtaaLink, set your prices, and start getting clients in your
+              Join Sokavi, set your prices, and start getting clients in your
               area today.
             </p>
           </div>

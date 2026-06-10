@@ -74,7 +74,7 @@ function RegisterForm() {
         business_name: data.role === "business" ? data.username : undefined,
       });
       setAuth(res.token, res.user);
-      toast.success("Account created! Welcome to MtaaLink.");
+      toast.success("Account created! Welcome to Sokavi.");
       if (data.role === "provider") router.push("/onboard/provider");
       else if (data.role === "business") router.push("/onboard/business");
       else router.push("/search");
@@ -90,7 +90,7 @@ function RegisterForm() {
     <Card className="w-full max-w-md border border-border shadow-none">
       <CardHeader className="space-y-1">
         <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
-        <CardDescription>Join MtaaLink — it takes under a minute</CardDescription>
+        <CardDescription>Join Sokavi — it takes under a minute</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" autoComplete="on">
