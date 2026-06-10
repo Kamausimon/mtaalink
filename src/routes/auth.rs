@@ -397,8 +397,8 @@ pub async fn forgot_password(
     .execute(&pool)
     .await?;
 
-    let app_url = env::var("APP_URL").unwrap_or_else(|_| "http://localhost:7878".to_string());
-    let reset_url = format!("{}/auth/reset-password?token={}", app_url, token);
+    let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let reset_url = format!("{}/reset-password?token={}", frontend_url, token);
     let html = password_reset_html(&reset_url, 15);
 
     if let Ok(config) = EmailConfig::from_env() {

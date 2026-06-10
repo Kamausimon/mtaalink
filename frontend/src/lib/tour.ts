@@ -11,7 +11,7 @@ function buildSteps(role: string | undefined) {
   return [
     {
       popover: {
-        title: "Welcome to MtaaLink \u{1F44B}",
+        title: "Welcome to Sokavi \u{1F44B}",
         description: isProviderOrBusiness
           ? "Let's take a quick look around so you can start getting bookings."
           : "Let's take a quick look around so you can find trusted local services.",
@@ -21,7 +21,7 @@ function buildSteps(role: string | undefined) {
       element: '[data-tour="logo"]',
       popover: {
         title: "Your home base",
-        description: "Click the MtaaLink logo any time to return to your dashboard.",
+        description: "Click the Sokavi logo any time to return to your dashboard.",
         side: "bottom" as const,
       },
     },

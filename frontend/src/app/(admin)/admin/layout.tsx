@@ -35,7 +35,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className={cn("flex flex-col h-full", mobile ? "p-4" : "p-6")}>
       <div className="flex items-center gap-2 mb-8">
         <span className="text-xl font-bold text-primary tracking-tight">
-          Mtaa<span className="text-accent">Link</span>
+          Sok<span className="text-accent">avi</span>
         </span>
         <span className="text-xs font-semibold bg-primary text-white rounded px-1.5 py-0.5 ml-1">
           Admin
@@ -97,7 +97,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Menu className="h-5 w-5" />
           </Button>
           <span className="text-base font-bold text-primary">
-            Mtaa<span className="text-accent">Link</span>
+            Sok<span className="text-accent">avi</span>
             <span className="text-xs font-semibold bg-primary text-white rounded px-1.5 py-0.5 ml-2">
               Admin
             </span>

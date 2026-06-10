@@ -50,7 +50,7 @@ function VerifyEmailContent() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6 text-center">
         <span className="text-2xl font-bold text-primary tracking-tight">
-          Mtaa<span className="text-accent">Link</span>
+          Sok<span className="text-accent">avi</span>
         </span>
 
         {status === "loading" && (
@@ -66,7 +66,7 @@ function VerifyEmailContent() {
             <div>
               <p className="font-semibold text-foreground text-lg">Email verified!</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Your email address has been confirmed. You can now use all features of MtaaLink.
+                Your email address has been confirmed. You can now use all features of Sokavi.
               </p>
             </div>
             {needsOnboarding && user ? (

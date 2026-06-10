@@ -56,7 +56,7 @@ export default function Navbar() {
           {/* Logo */}
           <Link href={isAuthenticated ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0" data-tour="logo">
             <span className="text-xl font-bold text-primary tracking-tight">
-              Mtaa<span className="text-accent">Link</span>
+              Sok<span className="text-accent">avi</span>
             </span>
           </Link>
 

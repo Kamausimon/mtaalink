@@ -94,7 +94,7 @@ export default function AdminDashboardPage() {
     <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Platform Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-1">Overview of MtaaLink activity</p>
+        <p className="text-sm text-muted-foreground mt-1">Overview of Sokavi activity</p>
       </div>
 
       {/* User stats */}

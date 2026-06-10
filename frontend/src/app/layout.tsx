@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: { default: "MtaaLink", template: "%s | MtaaLink" },
+  title: { default: "Sokavi", template: "%s | Sokavi" },
   description:
     "Find trusted local service providers in your neighbourhood — plumbers, cleaners, tutors, and more.",
   keywords: ["Kenya", "services", "marketplace", "fundi", "local services"],

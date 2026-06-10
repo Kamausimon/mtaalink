@@ -34,7 +34,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-1">
           <span className="text-2xl font-bold text-primary tracking-tight">
-            Mtaa<span className="text-accent">Link</span>
+            Sok<span className="text-accent">avi</span>
           </span>
           <h1 className="text-xl font-semibold text-foreground">Reset your password</h1>
           <p className="text-sm text-muted-foreground">
