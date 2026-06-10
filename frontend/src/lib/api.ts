@@ -208,6 +208,8 @@ export const api = {
       request<{ business: BusinessProfile; services: Service[]; branches: Branch[] }>(`/businesses/${id}`),
     onboard: (data: BusinessOnboardInput, token: string) =>
       request("/businesses/onboard", { method: "POST", body: data, token }),
+    updateProfile: (data: Partial<BusinessOnboardInput>, token: string) =>
+      request("/businesses/updateProfile", { method: "POST", body: data, token }),
   },
 
   // ── Bookings ────────────────────────────────────────────────────────────
