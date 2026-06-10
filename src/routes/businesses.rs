@@ -190,10 +190,9 @@ pub struct BusinessUpdateRequest {
     pub description: Option<String>,
     #[validate(length(min = 10))]
     pub phone_number: Option<String>,
-    #[validate(email)]
-    pub email: Option<String>,
     pub website: Option<String>,
     pub whatsapp: Option<String>,
+    pub profile_photo: Option<String>,
 }
 
 pub async fn update_business_profile(
@@ -233,11 +232,6 @@ pub async fn update_business_profile(
         bindings.push(v.clone());
         idx += 1;
     }
-    if let Some(ref v) = payload.email {
-        updates.push(format!("email = ${}", idx));
-        bindings.push(v.clone());
-        idx += 1;
-    }
     if let Some(ref v) = payload.website {
         updates.push(format!("website = ${}", idx));
         bindings.push(v.clone());
@@ -245,6 +239,11 @@ pub async fn update_business_profile(
     }
     if let Some(ref v) = payload.whatsapp {
         updates.push(format!("whatsapp = ${}", idx));
+        bindings.push(v.clone());
+        idx += 1;
+    }
+    if let Some(ref v) = payload.profile_photo {
+        updates.push(format!("profile_photo = ${}", idx));
         bindings.push(v.clone());
         idx += 1;
     }

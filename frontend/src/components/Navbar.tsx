@@ -12,8 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Bell, Menu, X, Search, Heart, ShieldCheck } from "lucide-react";
+import { Bell, Menu, X, Search, Heart, ShieldCheck, Compass } from "lucide-react";
 import { useState } from "react";
+import { startSiteTour } from "@/lib/tour";
 
 export default function Navbar() {
   const { user, isAuthenticated, isAdmin, clearAuth } = useAuthStore();
@@ -53,14 +54,14 @@ export default function Navbar() {
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="flex h-16 items-center justify-between gap-4">
           {/* Logo */}
-          <Link href={isAuthenticated ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0">
+          <Link href={isAuthenticated ? "/dashboard" : "/"} className="flex items-center gap-2 shrink-0" data-tour="logo">
             <span className="text-xl font-bold text-primary tracking-tight">
               Mtaa<span className="text-accent">Link</span>
             </span>
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden md:flex items-center gap-6" data-tour="nav-links">
             {navLinks.map((l) => (
               <Link
                 key={l.href}
@@ -85,13 +86,14 @@ export default function Navbar() {
                   variant="ghost"
                   size="icon"
                   onClick={() => router.push("/notifications")}
+                  data-tour="notifications"
                 >
                   <Bell className="h-5 w-5" />
                 </Button>
 
                 {/* User menu */}
                 <DropdownMenu>
-                  <DropdownMenuTrigger className="flex items-center gap-2 h-9 px-2 rounded-md hover:bg-muted transition-colors outline-none">
+                  <DropdownMenuTrigger className="flex items-center gap-2 h-9 px-2 rounded-md hover:bg-muted transition-colors outline-none" data-tour="user-menu">
                     <Avatar className="h-8 w-8">
                       <AvatarFallback className="bg-primary text-white text-xs font-semibold">
                         {initials}
@@ -141,6 +143,10 @@ export default function Navbar() {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => router.push("/profile")}>
                       Profile Settings
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => startSiteTour(user.role)} className="gap-2">
+                      <Compass className="h-4 w-4" />
+                      Take a tour
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem

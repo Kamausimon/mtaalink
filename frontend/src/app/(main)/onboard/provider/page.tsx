@@ -10,6 +10,7 @@ import { Camera, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
 import { uploadToCloudinary } from "@/lib/cloudinary";
+import { LocationCombobox } from "@/components/LocationCombobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -189,7 +190,11 @@ export default function ProviderOnboardPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Location / area</Label>
-                <Input placeholder="e.g. Westlands, Nairobi" {...register("location")} />
+                <LocationCombobox
+                  value={watch("location") ?? ""}
+                  onChange={(val) => setValue("location", val, { shouldValidate: true })}
+                  placeholder="e.g. Westlands, Nairobi"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Phone number</Label>
