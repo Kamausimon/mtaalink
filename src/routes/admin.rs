@@ -169,8 +169,8 @@ pub async fn get_users(
     let users = sqlx::query_as!(
         User,
         r#"SELECT u.id, u.username, u.email, u.role,
-                  p.id AS provider_id, p.approved AS provider_approved,
-                  b.id AS business_id, b.verified AS business_verified
+                  p.id AS "provider_id?", p.approved AS "provider_approved?",
+                  b.id AS "business_id?", b.verified AS "business_verified?"
            FROM users u
            LEFT JOIN providers   p ON p.user_id = u.id
            LEFT JOIN businesses  b ON b.user_id = u.id

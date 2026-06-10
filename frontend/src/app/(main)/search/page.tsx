@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { LocationCombobox } from "@/components/LocationCombobox";
 import { Search, SlidersHorizontal, Star, MapPin, Loader2, Navigation } from "lucide-react";
 import { toast } from "sonner";
 
@@ -217,10 +218,10 @@ function SearchContent() {
           />
         </div>
         <div className="relative flex-1">
-          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
+          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+          <LocationCombobox
             value={location}
-            onChange={(e) => setLocation(e.target.value)}
+            onChange={setLocation}
             placeholder="Location e.g. Kasarani, Nairobi"
             className="pl-9 bg-white"
           />
