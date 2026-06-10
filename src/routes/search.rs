@@ -26,6 +26,8 @@ pub struct SearchQuery {
     pub search_type: Option<String>,
     /// Filter by category (partial, case-insensitive).
     pub category: Option<String>,
+    /// Filter by location (partial, case-insensitive), e.g. "Kasarani, Nairobi".
+    pub location: Option<String>,
     /// User latitude for geo-proximity search.
     pub lat: Option<f64>,
     /// User longitude for geo-proximity search.
@@ -98,6 +100,13 @@ pub async fn search(
         .filter(|s| !s.trim().is_empty())
         .map(|s| format!("%{}%", s.trim()));
 
+    // Wrap location in SQL wildcards for ILIKE
+    let location = params
+        .location
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("%{}%", s.trim()));
+
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
@@ -111,14 +120,14 @@ pub async fn search(
     let (providers, businesses) = tokio::try_join!(
         async {
             if include_providers {
-                search_providers(&pool, q.as_deref(), category.as_deref(), lat, lng, radius_km, per_page, offset).await
+                search_providers(&pool, q.as_deref(), category.as_deref(), location.as_deref(), lat, lng, radius_km, per_page, offset).await
             } else {
                 Ok(vec![])
             }
         },
         async {
             if include_businesses {
-                search_businesses(&pool, q.as_deref(), category.as_deref(), lat, lng, radius_km, per_page, offset).await
+                search_businesses(&pool, q.as_deref(), category.as_deref(), location.as_deref(), lat, lng, radius_km, per_page, offset).await
             } else {
                 Ok(vec![])
             }
@@ -143,13 +152,14 @@ async fn search_providers(
     pool: &PgPool,
     q: Option<&str>,
     category: Option<&str>,
+    location: Option<&str>,
     lat: Option<f64>,
     lng: Option<f64>,
     radius_km: f64,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<ProviderResult>, AppError> {
-    // Params: $1=q, $2=category, $3=lat, $4=lng, $5=radius_km, $6=limit, $7=offset
+    // Params: $1=q, $2=category, $3=lat, $4=lng, $5=radius_km, $6=limit, $7=offset, $8=location
     //
     // NULL-safe filter pattern: ($N IS NULL OR <condition using $N>)
     // When the param is NULL the guard short-circuits, skipping that filter.
@@ -183,15 +193,18 @@ async fn search_providers(
         LEFT JOIN provider_locations pl
             ON pl.provider_id = p.id
         WHERE p.approved = true
+          AND p.onboarding_completed = true
           AND (
               $1::text IS NULL
               OR to_tsvector('english',
                      coalesce(p.service_name, '') || ' ' ||
                      coalesce(p.service_description, '') || ' ' ||
-                     coalesce(p.category, '')
+                     coalesce(p.category, '') || ' ' ||
+                     coalesce(p.location, '')
                  ) @@ plainto_tsquery('english', $1::text)
           )
           AND ($2::text IS NULL OR p.category ILIKE $2::text)
+          AND ($8::text IS NULL OR p.location ILIKE $8::text)
         GROUP BY p.id
         HAVING (
             $3::float8 IS NULL
@@ -209,7 +222,8 @@ async fn search_providers(
                         to_tsvector('english',
                             coalesce(p.service_name, '') || ' ' ||
                             coalesce(p.service_description, '') || ' ' ||
-                            coalesce(p.category, '')
+                            coalesce(p.category, '') || ' ' ||
+                            coalesce(p.location, '')
                         ),
                         plainto_tsquery('english', $1::text)
                     )
@@ -227,6 +241,7 @@ async fn search_providers(
         .bind(radius_km)
         .bind(limit)
         .bind(offset)
+        .bind(location)
         .fetch_all(pool)
         .await
         .map_err(AppError::Database)
@@ -238,6 +253,7 @@ async fn search_businesses(
     pool: &PgPool,
     q: Option<&str>,
     category: Option<&str>,
+    location: Option<&str>,
     lat: Option<f64>,
     lng: Option<f64>,
     radius_km: f64,
@@ -272,15 +288,18 @@ async fn search_businesses(
         LEFT JOIN business_branches bb
             ON bb.business_id = b.id
         WHERE b.verified = true
+          AND b.onboarding_completed = true
           AND (
               $1::text IS NULL
               OR to_tsvector('english',
                      coalesce(b.business_name, '') || ' ' ||
                      coalesce(b.description, '') || ' ' ||
-                     coalesce(b.category, '')
+                     coalesce(b.category, '') || ' ' ||
+                     coalesce(b.location, '')
                  ) @@ plainto_tsquery('english', $1::text)
           )
           AND ($2::text IS NULL OR b.category ILIKE $2::text)
+          AND ($8::text IS NULL OR b.location ILIKE $8::text)
         GROUP BY b.id
         HAVING (
             $3::float8 IS NULL
@@ -298,7 +317,8 @@ async fn search_businesses(
                         to_tsvector('english',
                             coalesce(b.business_name, '') || ' ' ||
                             coalesce(b.description, '') || ' ' ||
-                            coalesce(b.category, '')
+                            coalesce(b.category, '') || ' ' ||
+                            coalesce(b.location, '')
                         ),
                         plainto_tsquery('english', $1::text)
                     )
@@ -316,6 +336,7 @@ async fn search_businesses(
         .bind(radius_km)
         .bind(limit)
         .bind(offset)
+        .bind(location)
         .fetch_all(pool)
         .await
         .map_err(AppError::Database)

@@ -1,5 +1,6 @@
 import Navbar from "@/components/Navbar";
 import EmailVerificationBanner from "@/components/EmailVerificationBanner";
+import AuthSync from "@/components/AuthSync";
 
 export default function MainLayout({
   children,
@@ -8,6 +9,7 @@ export default function MainLayout({
 }) {
   return (
     <>
+      <AuthSync />
       <Navbar />
       <EmailVerificationBanner />
       <main className="flex-1">{children}</main>

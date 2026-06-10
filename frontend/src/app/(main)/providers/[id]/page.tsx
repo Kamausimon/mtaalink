@@ -228,6 +228,12 @@ export default function ProviderProfilePage() {
   return (
     <>
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 space-y-6">
+        {provider.onboarding_completed === false && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            This provider hasn&apos;t finished setting up their profile yet. Booking is unavailable until setup is complete.
+          </div>
+        )}
+
         {/* Header card */}
         <Card className="border border-border overflow-hidden">
           {provider.cover_photo && (
@@ -280,7 +286,12 @@ export default function ProviderProfilePage() {
             )}
 
             <div className="flex flex-wrap items-center gap-3 mt-5">
-              <Button onClick={handleBook} className="gap-2">
+              <Button
+                onClick={handleBook}
+                className="gap-2"
+                disabled={provider.onboarding_completed === false}
+                title={provider.onboarding_completed === false ? "This provider hasn't finished setting up their profile" : undefined}
+              >
                 Book this provider
               </Button>
               {provider.phone_number && (

@@ -78,7 +78,8 @@ pub async fn onboard_service_provider(
              email = $6,
              website = $7,
              whatsapp = $8,
-             profile_photo = COALESCE($9, profile_photo)
+             profile_photo = COALESCE($9, profile_photo),
+             onboarding_completed = TRUE
          WHERE user_id = $10 RETURNING id"#,
         payload.service_name,
         payload.service_description,
@@ -137,7 +138,8 @@ pub async fn list_providers(
            FROM providers p
            JOIN users u ON p.user_id = u.id
            LEFT JOIN reviews r ON r.target_id = p.id AND r.target_type = 'provider'
-           WHERE ($1::text IS NULL OR p.category = $1)
+           WHERE p.onboarding_completed = TRUE
+             AND ($1::text IS NULL OR p.category = $1)
              AND ($2::text IS NULL OR p.location = $2)
            GROUP BY p.id
            ORDER BY avg_rating DESC NULLS LAST, p.id"#,
@@ -165,6 +167,7 @@ struct ProviderPublicProfile {
     whatsapp: Option<String>,
     profile_photo: Option<String>,
     cover_photo: Option<String>,
+    onboarding_completed: bool,
     avg_rating: Option<f64>,
     review_count: Option<i64>,
 }
@@ -176,7 +179,7 @@ pub async fn get_provider_public_profile(
     let profile = sqlx::query_as::<_, ProviderPublicProfile>(
         r#"SELECT p.id, p.user_id, p.service_name, p.service_description, p.category, p.location,
                   p.email, p.phone_number, p.website, p.whatsapp,
-                  p.profile_photo, p.cover_photo,
+                  p.profile_photo, p.cover_photo, p.onboarding_completed,
                   ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
                   COUNT(r.id) AS review_count
            FROM providers p
