@@ -36,7 +36,7 @@ const CATEGORIES = [
 ];
 
 export default function BusinessOnboardPage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, updateUser } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -95,6 +95,7 @@ export default function BusinessOnboardPage() {
         },
         token!,
       );
+      if (user) updateUser({ ...user, onboarding_completed: true });
       toast.success("Business profile created! You can now receive bookings.");
       router.push("/dashboard");
     } catch (err: unknown) {

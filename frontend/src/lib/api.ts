@@ -48,6 +48,17 @@ type RawAuthResponse = {
   username: string;
   role: string;
   email_verified?: boolean;
+  onboarding_completed?: boolean;
+};
+
+// Flat shape returned by /auth/me
+type MeResponse = {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+  email_verified?: boolean;
+  onboarding_completed?: boolean;
 };
 
 export const api = {
@@ -64,7 +75,14 @@ export const api = {
       const raw = await request<RawAuthResponse>("/auth/register", { method: "POST", body: data });
       return {
         token: raw.token,
-        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"], email_verified: raw.email_verified ?? false },
+        user: {
+          id: raw.user_id,
+          username: raw.username,
+          email: data.email,
+          role: raw.role as User["role"],
+          email_verified: raw.email_verified ?? false,
+          onboarding_completed: raw.onboarding_completed ?? false,
+        },
       };
     },
 
@@ -72,11 +90,18 @@ export const api = {
       const raw = await request<RawAuthResponse>("/auth/login", { method: "POST", body: data });
       return {
         token: raw.token,
-        user: { id: raw.user_id, username: raw.username, email: data.email, role: raw.role as User["role"], email_verified: raw.email_verified ?? false },
+        user: {
+          id: raw.user_id,
+          username: raw.username,
+          email: data.email,
+          role: raw.role as User["role"],
+          email_verified: raw.email_verified ?? false,
+          onboarding_completed: raw.onboarding_completed ?? false,
+        },
       };
     },
 
-    me: (token: string) => request<{ user: User }>("/auth/me", { token }),
+    me: (token: string) => request<MeResponse>("/auth/me", { token }),
 
     forgotPassword: (email: string) =>
       request("/auth/forgot-password", { method: "POST", body: { email } }),
@@ -99,6 +124,7 @@ export const api = {
       const qs = new URLSearchParams();
       if (params.q) qs.set("q", params.q);
       if (params.category) qs.set("category", params.category);
+      if (params.location) qs.set("location", params.location);
       if (params.lat) qs.set("lat", String(params.lat));
       if (params.lng) qs.set("lng", String(params.lng));
       if (params.radius_km) qs.set("radius_km", String(params.radius_km));
@@ -426,6 +452,7 @@ export type User = {
   email: string;
   role: "client" | "provider" | "business" | "admin";
   email_verified?: boolean;
+  onboarding_completed?: boolean;
 };
 
 export type DashboardData = {
@@ -445,6 +472,7 @@ export type DashboardData = {
 export type SearchParams = {
   q?: string;
   category?: string;
+  location?: string;
   lat?: number;
   lng?: number;
   radius_km?: number;
@@ -519,6 +547,7 @@ export type ProviderProfile = PublicProvider & {
   service_description?: string;
   whatsapp?: string;
   cover_photo?: string;
+  onboarding_completed?: boolean;
 };
 
 export type PublicBusiness = {
@@ -540,6 +569,7 @@ export type PublicBusiness = {
 export type BusinessProfile = PublicBusiness & {
   whatsapp?: string;
   cover_photo?: string;
+  onboarding_completed?: boolean;
 };
 
 export type Service = {

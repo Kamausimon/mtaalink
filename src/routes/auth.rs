@@ -214,6 +214,7 @@ pub async fn register(
             "role": payload.role,
             "token": token,
             "email_verified": false,
+            "onboarding_completed": payload.role == "client",
         })),
     ))
 }
@@ -272,7 +273,17 @@ pub async fn login_handler(
     payload.email = normalize_email(&payload.email);
 
     let user = sqlx::query!(
-        "SELECT id, username, password, role, email_verified FROM users WHERE email = $1",
+        r#"SELECT
+            u.id, u.username, u.password, u.role, u.email_verified,
+            CASE
+                WHEN u.role = 'provider' THEN COALESCE(p.onboarding_completed, FALSE)
+                WHEN u.role = 'business' THEN COALESCE(b.onboarding_completed, FALSE)
+                ELSE TRUE
+            END AS "onboarding_completed!"
+        FROM users u
+        LEFT JOIN providers p ON p.user_id = u.id
+        LEFT JOIN businesses b ON b.user_id = u.id
+        WHERE u.email = $1"#,
         payload.email
     )
     .fetch_optional(&db)
@@ -296,6 +307,7 @@ pub async fn login_handler(
                     "username": user.username,
                     "role": user.role.unwrap_or_else(|| "unknown".to_string()),
                     "email_verified": user.email_verified,
+                    "onboarding_completed": user.onboarding_completed,
                 })),
             ));
         }
@@ -318,7 +330,12 @@ pub async fn me(
             WHEN p.id IS NOT NULL THEN 'provider'
             WHEN b.id IS NOT NULL THEN 'business'
             ELSE 'unknown'
-          END AS role
+          END AS role,
+          CASE
+            WHEN p.id IS NOT NULL THEN COALESCE(p.onboarding_completed, FALSE)
+            WHEN b.id IS NOT NULL THEN COALESCE(b.onboarding_completed, FALSE)
+            ELSE TRUE
+          END AS "onboarding_completed!"
         FROM users u
         LEFT JOIN clients c ON u.id = c.user_id
         LEFT JOIN providers p ON u.id = p.user_id
@@ -338,6 +355,7 @@ pub async fn me(
                 "email": u.email,
                 "role": u.role.unwrap_or_else(|| "unknown".to_string()),
                 "email_verified": u.email_verified,
+                "onboarding_completed": u.onboarding_completed,
             })),
         )),
         None => Err(AppError::NotFound("User not found".to_string())),

@@ -35,7 +35,7 @@ const CATEGORIES = [
 ];
 
 export default function ProviderOnboardPage() {
-  const { token, user, isAuthenticated } = useAuthStore();
+  const { token, user, isAuthenticated, updateUser } = useAuthStore();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -92,6 +92,7 @@ export default function ProviderOnboardPage() {
         },
         token!,
       );
+      if (user) updateUser({ ...user, onboarding_completed: true });
       toast.success("Profile set up! You can now start receiving bookings.");
       router.push("/dashboard");
     } catch (err: unknown) {

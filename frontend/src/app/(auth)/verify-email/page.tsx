@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/auth";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { Suspense } from "react";
 
@@ -12,6 +13,8 @@ function VerifyEmailContent() {
   const token = searchParams.get("token") ?? "";
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("");
+  const { user, token: authToken, updateUser } = useAuthStore();
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -20,11 +23,27 @@ function VerifyEmailContent() {
       return;
     }
     api.auth.verifyEmail(token)
-      .then(() => setStatus("success"))
+      .then(async () => {
+        setStatus("success");
+        if (authToken && user) {
+          try {
+            const fresh = await api.auth.me(authToken);
+            updateUser({
+              ...user,
+              email_verified: fresh.email_verified,
+              onboarding_completed: fresh.onboarding_completed,
+            });
+            setNeedsOnboarding(fresh.onboarding_completed === false);
+          } catch {
+            // ignore — banner/redirect will refresh on next navigation
+          }
+        }
+      })
       .catch((e) => {
         setStatus("error");
         setMessage(e?.message ?? "Verification failed. The link may have expired.");
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   return (
@@ -50,9 +69,15 @@ function VerifyEmailContent() {
                 Your email address has been confirmed. You can now use all features of MtaaLink.
               </p>
             </div>
-            <Link href="/dashboard" className="inline-flex items-center justify-center w-full rounded-md bg-primary text-white text-sm font-medium h-10 px-4 py-2 hover:bg-primary/90 transition-colors">
-              Go to dashboard
-            </Link>
+            {needsOnboarding && user ? (
+              <Link href={`/onboard/${user.role}`} className="inline-flex items-center justify-center w-full rounded-md bg-primary text-white text-sm font-medium h-10 px-4 py-2 hover:bg-primary/90 transition-colors">
+                Finish setting up your profile
+              </Link>
+            ) : (
+              <Link href="/dashboard" className="inline-flex items-center justify-center w-full rounded-md bg-primary text-white text-sm font-medium h-10 px-4 py-2 hover:bg-primary/90 transition-colors">
+                Go to dashboard
+              </Link>
+            )}
           </div>
         )}
 

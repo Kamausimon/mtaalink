@@ -79,7 +79,8 @@ pub async fn onboard_business(
             email = $8,
             website = $9,
             whatsapp = $10,
-            profile_photo = COALESCE($11, profile_photo)
+            profile_photo = COALESCE($11, profile_photo),
+            onboarding_completed = TRUE
          WHERE user_id = $12 RETURNING id"#,
         payload.business_name,
         payload.description,
@@ -149,7 +150,8 @@ pub async fn list_businesses(
     let mut query = String::from(
         "SELECT b.id, b.business_name, b.description, b.category, b.location, \
          b.phone_number, b.email, b.website, b.whatsapp \
-         FROM businesses b JOIN users u ON b.user_id = u.id WHERE 1=1",
+         FROM businesses b JOIN users u ON b.user_id = u.id \
+         WHERE b.onboarding_completed = TRUE",
     );
     let mut bindings: Vec<String> = Vec::new();
     let mut param_index = 1;
@@ -373,6 +375,7 @@ struct BusinessPublicProfile {
     logo: Option<String>,
     profile_photo: Option<String>,
     cover_photo: Option<String>,
+    onboarding_completed: bool,
     avg_rating: Option<f64>,
     review_count: Option<i64>,
 }
@@ -384,7 +387,7 @@ pub async fn get_business_public_profile(
     let profile = sqlx::query_as::<_, BusinessPublicProfile>(
         r#"SELECT b.id, b.business_name, b.description, b.category, b.location,
                   b.phone_number, b.email, b.website, b.whatsapp,
-                  b.logo, b.profile_photo, b.cover_photo,
+                  b.logo, b.profile_photo, b.cover_photo, b.onboarding_completed,
                   ROUND(AVG(r.rating)::numeric, 1)::float8 AS avg_rating,
                   COUNT(r.id) AS review_count
            FROM businesses b

@@ -90,6 +90,7 @@ function SearchContent() {
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
+  const [location, setLocation] = useState(searchParams.get("location") ?? "");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -106,7 +107,10 @@ function SearchContent() {
   }, [_hasHydrated, user, router]);
 
   function useMyLocation() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      toast.error("Your browser doesn't support location. Try typing your area instead.");
+      return;
+    }
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -115,17 +119,24 @@ function SearchContent() {
         setUserLat(lat);
         setUserLng(lng);
         setGpsLoading(false);
-        runSearch(query, category, 1, false, lat, lng);
+        runSearch(query, category, location, 1, false, lat, lng);
       },
-      () => {
+      (err) => {
         setGpsLoading(false);
-        toast.error("Could not get your location. Please allow location access.");
+        if (err.code === err.PERMISSION_DENIED) {
+          toast.error(
+            "Location access is blocked. Enable it in your browser settings, or just type your area (e.g. \"Kasarani, Nairobi\") in the location field.",
+            { duration: 6000 },
+          );
+        } else {
+          toast.error("Could not get your location. Try typing your area instead.");
+        }
       },
       { timeout: 10000 },
     );
   }
 
-  const runSearch = useCallback(async (q: string, cat: string, nextPage = 1, append = false, lat?: number, lng?: number) => {
+  const runSearch = useCallback(async (q: string, cat: string, loc: string, nextPage = 1, append = false, lat?: number, lng?: number) => {
     if (nextPage === 1) setLoading(true);
     else setLoadingMore(true);
     setSearched(true);
@@ -137,6 +148,7 @@ function SearchContent() {
       const res = await api.search.query({
         q: q || undefined,
         category: cat || undefined,
+        location: loc || undefined,
         page: nextPage,
         per_page: PER_PAGE,
         lat: resolvedLat ?? undefined,
@@ -157,9 +169,11 @@ function SearchContent() {
   useEffect(() => {
     const q = searchParams.get("q");
     const cat = searchParams.get("category");
+    const loc = searchParams.get("location");
     setQuery(q ?? "");
     setCategory(cat ?? "");
-    runSearch(q ?? "", cat ?? "", 1, false);
+    setLocation(loc ?? "");
+    runSearch(q ?? "", cat ?? "", loc ?? "", 1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -168,17 +182,18 @@ function SearchContent() {
     const qs = new URLSearchParams();
     if (query) qs.set("q", query);
     if (category) qs.set("category", category);
+    if (location) qs.set("location", location);
     router.push(`/search?${qs}`);
-    runSearch(query, category, 1, false);
+    runSearch(query, category, location, 1, false);
   }
 
   function selectCategory(cat: string) {
     setCategory(cat);
-    runSearch(query, cat, 1, false);
+    runSearch(query, cat, location, 1, false);
   }
 
   function loadMore() {
-    runSearch(query, category, page + 1, true);
+    runSearch(query, category, location, page + 1, true);
   }
 
   const hasMore = results.length < total;
@@ -191,33 +206,47 @@ function SearchContent() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8">
       {/* Search bar */}
-      <form onSubmit={handleSubmit} className="flex gap-2 mb-6">
+      <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2 mb-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search services, providers, or businesses…"
+            placeholder="What are you looking for? e.g. Plumbing"
             className="pl-9 bg-white"
           />
         </div>
-        <Button
-          type="button"
-          variant={userLat ? "default" : "outline"}
-          className="gap-1.5 shrink-0"
-          onClick={useMyLocation}
-          disabled={gpsLoading}
-          title="Search near my location"
-        >
-          {gpsLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Navigation className="h-4 w-4" />
-          )}
-          <span className="hidden sm:inline">{userLat ? "Near me ✓" : "Near me"}</span>
-        </Button>
-        <Button type="submit">Search</Button>
+        <div className="relative flex-1">
+          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Location e.g. Kasarani, Nairobi"
+            className="pl-9 bg-white"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant={userLat ? "default" : "outline"}
+            className="gap-1.5 shrink-0"
+            onClick={useMyLocation}
+            disabled={gpsLoading}
+            title="Search near my current location"
+          >
+            {gpsLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Navigation className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">{userLat ? "Near me ✓" : "Near me"}</span>
+          </Button>
+          <Button type="submit" className="shrink-0">Search</Button>
+        </div>
       </form>
+      <p className="text-xs text-muted-foreground mb-6">
+        Tip: type an area like &ldquo;Kasarani, Nairobi&rdquo; if you&apos;d rather not share your location.
+      </p>
 
       {/* Category pills */}
       <div className="flex flex-wrap gap-2 mb-8">
@@ -259,10 +288,11 @@ function SearchContent() {
         <>
           <p className="text-sm text-muted-foreground mb-4">
             Showing {results.length} of {total} result{total !== 1 ? "s" : ""}
-            {(query || category) && (
+            {(query || category || location) && (
               <span>
                 {query && <> for <strong>&ldquo;{query}&rdquo;</strong></>}
                 {category && <> in <strong>{category}</strong></>}
+                {location && <> near <strong>{location}</strong></>}
               </span>
             )}
           </p>
