@@ -84,7 +84,7 @@ async fn main() {
 
     // Create a connection pool
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(25)
         .connect(&database_url)
         .await
         .expect("Failed to create pool");
