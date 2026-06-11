@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT service_description, scheduled_time FROM bookings WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "service_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "scheduled_time",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "6fb440236ed9a98607bc8bde9906132a72f98df076da9bc375feca0ada39604e"
+}

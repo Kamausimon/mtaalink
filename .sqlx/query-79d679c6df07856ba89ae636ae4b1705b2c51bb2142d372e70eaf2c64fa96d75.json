@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                COUNT(*) AS total,\n                COUNT(*) FILTER (WHERE status = 'pending')   AS pending,\n                COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,\n                COUNT(*) FILTER (WHERE status = 'completed') AS completed,\n                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled\n               FROM bookings",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "pending",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "confirmed",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "completed",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "cancelled",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "79d679c6df07856ba89ae636ae4b1705b2c51bb2142d372e70eaf2c64fa96d75"
+}

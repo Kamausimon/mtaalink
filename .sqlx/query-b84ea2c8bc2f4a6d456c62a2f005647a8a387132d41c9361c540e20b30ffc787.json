@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n          u.email,\n          u.username,\n          u.email_verified,\n          CASE\n            WHEN c.id IS NOT NULL THEN 'client'\n            WHEN p.id IS NOT NULL THEN 'provider'\n            WHEN b.id IS NOT NULL THEN 'business'\n            ELSE 'unknown'\n          END AS role,\n          CASE\n            WHEN p.id IS NOT NULL THEN COALESCE(p.onboarding_completed, FALSE)\n            WHEN b.id IS NOT NULL THEN COALESCE(b.onboarding_completed, FALSE)\n            ELSE TRUE\n          END AS \"onboarding_completed!\"\n        FROM users u\n        LEFT JOIN clients c ON u.id = c.user_id\n        LEFT JOIN providers p ON u.id = p.user_id\n        LEFT JOIN businesses b ON u.id = b.user_id\n        WHERE u.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "onboarding_completed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "b84ea2c8bc2f4a6d456c62a2f005647a8a387132d41c9361c540e20b30ffc787"
+}

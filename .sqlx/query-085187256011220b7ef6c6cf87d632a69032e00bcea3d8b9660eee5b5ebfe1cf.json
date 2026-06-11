@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, file_name, file_path, file_type, post_id, target_type, target_id, created_at FROM attachments WHERE target_type = $1 AND target_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "post_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "target_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "085187256011220b7ef6c6cf87d632a69032e00bcea3d8b9660eee5b5ebfe1cf"
+}

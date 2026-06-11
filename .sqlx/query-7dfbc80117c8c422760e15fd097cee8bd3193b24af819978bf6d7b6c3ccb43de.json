@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO content_flags (target_type, target_id, reason, flagged_by) VALUES ('review', $1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7dfbc80117c8c422760e15fd097cee8bd3193b24af819978bf6d7b6c3ccb43de"
+}

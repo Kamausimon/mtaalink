@@ -133,7 +133,7 @@ async fn main() {
         .route("/", get(root));
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
-    let addr = SocketAddr::from(([127, 0, 0, 1], port.parse::<u16>().unwrap()));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port.parse::<u16>().unwrap()));
     println!("listening on http://{}", addr);
 
     bind(addr).serve(app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO wallets (target_type, target_id, balance, total_earned)\n           VALUES ($1, $2, $3, $3)\n           ON CONFLICT (target_type, target_id) DO UPDATE\n               SET balance      = wallets.balance      + $3,\n                   total_earned = wallets.total_earned  + $3,\n                   updated_at   = NOW()\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9012c6fbfd3cdc2522d42dcabb2f4f345ee9acbf629db2588d54ed8aaaabda93"
+}

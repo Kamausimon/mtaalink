@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE payments\n           SET status = $1,\n               transaction_id = $2,\n               result_code = $3,\n               result_desc = $4,\n               updated_at = NOW()\n           WHERE checkout_request_id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b3bfa8a76b5319606477bb0e8fadb6db35a613d3ec21cbdcf3de868280a0b619"
+}

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_locations SET\n               latitude   = COALESCE($1, latitude),\n               longitude  = COALESCE($2, longitude),\n               ward_id    = COALESCE($3, ward_id),\n               phone      = COALESCE($4, phone),\n               address    = COALESCE($5, address),\n               updated_at = NOW()\n           WHERE id = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Float8",
+        "Int4",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "267d7888adb94871655c667fc5da37961da83a071e5912522fcd03a6399d50d5"
+}

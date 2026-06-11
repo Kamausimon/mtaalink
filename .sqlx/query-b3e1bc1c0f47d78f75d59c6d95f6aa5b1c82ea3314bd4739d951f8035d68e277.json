@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.id, u.username, u.email, u.role,\n                  p.id AS \"provider_id?\", p.approved AS \"provider_approved?\",\n                  b.id AS \"business_id?\", b.verified AS \"business_verified?\"\n           FROM users u\n           LEFT JOIN providers   p ON p.user_id = u.id\n           LEFT JOIN businesses  b ON b.user_id = u.id\n           ORDER BY u.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_id?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_approved?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "business_id?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "business_verified?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b3e1bc1c0f47d78f75d59c6d95f6aa5b1c82ea3314bd4739d951f8035d68e277"
+}

@@ -1,0 +1,92 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n               b.id                                         AS booking_id,\n               b.client_id,\n               u.username                                   AS client_username,\n               COALESCE(p.user_id, biz.user_id)            AS service_owner_user_id,\n               b.target_type,\n               b.target_id,\n               COALESCE(p.service_name, biz.business_name) AS provider_name,\n               b.service_description,\n               b.scheduled_time,\n               b.dispute_reason,\n               b.dispute_response,\n               b.admin_resolution,\n               b.created_at\n           FROM bookings b\n           JOIN users u ON u.id = b.client_id\n           LEFT JOIN providers   p   ON b.target_type = 'provider' AND b.target_id = p.id\n           LEFT JOIN businesses  biz ON b.target_type = 'business' AND b.target_id = biz.id\n           WHERE b.status = 'disputed'\n           ORDER BY b.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "booking_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "client_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "service_owner_user_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "target_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "service_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "scheduled_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 9,
+        "name": "dispute_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "dispute_response",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "admin_resolution",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "24488aea05a93c562cd0636e89845a9d0de20fef1b0645a86909e26beb079108"
+}

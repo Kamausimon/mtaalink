@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE content_flags SET resolved = TRUE WHERE target_type = 'review' AND target_id = $1 AND resolved = FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6cd166f56791ebc3a1a6422610e7c9826c9c6efee2d1308ae3e2d67490bf5fe5"
+}

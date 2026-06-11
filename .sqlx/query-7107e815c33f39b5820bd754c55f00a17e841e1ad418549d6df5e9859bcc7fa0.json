@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO payments\n               (booking_id, phone_number, amount, checkout_request_id, merchant_request_id, status)\n           VALUES ($1, $2, $3, $4, $5, 'pending')\n           RETURNING id, booking_id, phone_number, amount, checkout_request_id,\n                     transaction_id, status, result_desc, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "booking_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "phone_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "checkout_request_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "transaction_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "result_desc",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Numeric",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "7107e815c33f39b5820bd754c55f00a17e841e1ad418549d6df5e9859bcc7fa0"
+}

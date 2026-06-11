@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE services\n           SET title = COALESCE($1, title),\n               description = COALESCE($2, description),\n               price = COALESCE($3, price),\n               duration = COALESCE($4, duration),\n               category_id = COALESCE($5, category_id),\n               is_active = COALESCE($6, is_active)\n           WHERE id = $7 AND target_id = $8 AND target_type = $9\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Numeric",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "91a45bdf8621b7c97b42b40c787faf75dea3e9c6fc8ccafcc03abaeb52ee3136"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT balance, total_earned FROM wallets WHERE target_type = 'business' AND target_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "balance",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_earned",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9e0e385f41c8878aea23a3d32426a5c2af5d55287dba2cb6f7216723c94b5b1c"
+}

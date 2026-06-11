@@ -6,5 +6,5 @@
 .cargo
 config.toml
 
-.sqlx
 backend.log
+

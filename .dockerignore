@@ -1,0 +1,8 @@
+target
+frontend
+load-tests
+uploads
+.git
+.env
+backend.log
+*.log
