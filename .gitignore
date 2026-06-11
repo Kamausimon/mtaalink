@@ -8,3 +8,6 @@ config.toml
 
 backend.log
 
+
+pg_dump --no-owner --no-acl -Fc postgres://postgres:Kamau0746@localhost:5432/postgres -f mtaalink.dump
+pg_restore --no-owner --no-acl -d "<postgresql://postgres:XUqphMtXrFhRGhhTiQnnYXXwcEnvLnnl@acela.proxy.rlwy.net:42496/railway>" mtaalink.dump
