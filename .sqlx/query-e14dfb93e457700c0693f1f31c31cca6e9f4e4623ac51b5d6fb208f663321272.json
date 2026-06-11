@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO provider_availability (provider_id, is_available, day, start_time, end_time) VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bool",
+        "Varchar",
+        "Time",
+        "Time"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e14dfb93e457700c0693f1f31c31cca6e9f4e4623ac51b5d6fb208f663321272"
+}

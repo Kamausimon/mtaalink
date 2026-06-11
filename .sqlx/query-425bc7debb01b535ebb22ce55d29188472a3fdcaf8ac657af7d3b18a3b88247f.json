@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 FROM provider_locations pl\n         JOIN providers p ON pl.provider_id = p.id\n         WHERE pl.id = $1 AND p.user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "?column?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "425bc7debb01b535ebb22ce55d29188472a3fdcaf8ac657af7d3b18a3b88247f"
+}

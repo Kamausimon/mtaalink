@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE bookings\n           SET status = $1, admin_resolution = $2, updated_at = NOW()\n           WHERE id = $3 AND status = 'disputed'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0367073d7bd7238f7219ff2fce44dea6ebc1fe2e541aa5f56c940340883a142c"
+}

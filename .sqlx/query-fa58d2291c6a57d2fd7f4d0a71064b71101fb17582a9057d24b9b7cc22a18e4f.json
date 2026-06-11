@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, service_name, service_description, category, location, phone_number, email, website, whatsapp FROM providers WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "service_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "service_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "category",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "location",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "phone_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "website",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "whatsapp",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "fa58d2291c6a57d2fd7f4d0a71064b71101fb17582a9057d24b9b7cc22a18e4f"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages SET is_read = TRUE, read_at = $1\n         WHERE id = ANY($2) AND receiver_id = $3 AND is_read = FALSE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Int4Array",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "19f0629d0f12964a9b4235bfda940ccdac115f79577a0cb23e42410c5db350ac"
+}

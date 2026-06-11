@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE businesses SET verified = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4dcc0b6a9470ec553961f0c39ad949a81e99a9a7eb0fc3ddda7b1c3c84ae9fa"
+}

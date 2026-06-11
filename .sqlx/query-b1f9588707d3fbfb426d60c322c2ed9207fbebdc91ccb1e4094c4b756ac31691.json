@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT target_type, target_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "target_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b1f9588707d3fbfb426d60c322c2ed9207fbebdc91ccb1e4094c4b756ac31691"
+}

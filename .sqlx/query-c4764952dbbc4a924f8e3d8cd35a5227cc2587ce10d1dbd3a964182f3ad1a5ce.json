@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n               r.id AS review_id,\n               r.reviewer_id,\n               r.target_type,\n               r.target_id,\n               r.rating,\n               r.comment,\n               COUNT(cf.id) AS flag_count\n           FROM reviews r\n           LEFT JOIN content_flags cf\n               ON cf.target_type = 'review' AND cf.target_id = r.id AND cf.resolved = FALSE\n           GROUP BY r.id\n           HAVING COUNT(cf.id) > 0\n           ORDER BY flag_count DESC, r.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "review_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "reviewer_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "rating",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "flag_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "c4764952dbbc4a924f8e3d8cd35a5227cc2587ce10d1dbd3a964182f3ad1a5ce"
+}

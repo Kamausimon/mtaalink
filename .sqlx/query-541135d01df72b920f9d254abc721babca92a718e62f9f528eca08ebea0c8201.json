@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT target_type, target_id, client_id FROM bookings WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "target_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "client_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "541135d01df72b920f9d254abc721babca92a718e62f9f528eca08ebea0c8201"
+}

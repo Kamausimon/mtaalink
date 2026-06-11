@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_availability SET is_available = $1, start_time = $2, end_time = $3 WHERE provider_id = $4 AND day = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Time",
+        "Time",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7fdc8069a11b8f0fe6e9a0a4b2f52e95e1bf1a46210eeb85a466ec276f148278"
+}

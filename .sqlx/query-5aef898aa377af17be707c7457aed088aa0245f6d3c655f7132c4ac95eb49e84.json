@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM bookings\n           WHERE client_id = $1 AND target_type = $2 AND target_id = $3\n             AND status = 'completed'\n           ORDER BY updated_at DESC\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5aef898aa377af17be707c7457aed088aa0245f6d3c655f7132c4ac95eb49e84"
+}

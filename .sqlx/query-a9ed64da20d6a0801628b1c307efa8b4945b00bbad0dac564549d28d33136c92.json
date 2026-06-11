@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO wallet_transactions\n               (wallet_id, txn_type, amount, description, booking_id, payment_id)\n           VALUES ($1, 'credit', $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Numeric",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9ed64da20d6a0801628b1c307efa8b4945b00bbad0dac564549d28d33136c92"
+}

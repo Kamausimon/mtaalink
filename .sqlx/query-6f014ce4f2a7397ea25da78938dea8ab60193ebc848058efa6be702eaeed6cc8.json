@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO interactions (user_id, target_type, target_id, interaction_type)\n         VALUES ($1, $2, $3, 'message')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f014ce4f2a7397ea25da78938dea8ab60193ebc848058efa6be702eaeed6cc8"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT target_type, target_id FROM service_packages WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "target_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "eaa8ac5c2c5d1a0f7e9504bd8ad5684dd8766e2e31621aef3ce418760bf9f418"
+}

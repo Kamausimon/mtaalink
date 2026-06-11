@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE clients\n           SET phone    = COALESCE($1, phone),\n               bio      = COALESCE($2, bio),\n               location = COALESCE($3, location)\n           WHERE user_id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4b0c11b9526cd28cebbd02b936e224acf3cad66dbbe46334908a094056ab09d8"
+}

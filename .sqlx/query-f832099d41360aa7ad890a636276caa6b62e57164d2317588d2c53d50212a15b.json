@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT b.id, b.client_id, b.scheduled_time,\n                  b.service_description, b.target_type, b.target_id\n           FROM bookings b\n           WHERE b.scheduled_time >= $1\n             AND b.scheduled_time <= $2\n             AND b.status NOT IN ('cancelled', 'completed')\n             AND b.reminder_sent = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "scheduled_time",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 3,
+        "name": "service_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "target_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f832099d41360aa7ad890a636276caa6b62e57164d2317588d2c53d50212a15b"
+}

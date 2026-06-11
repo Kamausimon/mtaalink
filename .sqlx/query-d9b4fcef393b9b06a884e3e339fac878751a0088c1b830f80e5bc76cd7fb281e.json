@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT b.id AS booking_id, b.client_id, b.target_type, b.target_id\n         FROM bookings b\n         JOIN payments p ON p.booking_id = b.id\n         WHERE p.checkout_request_id = $1\n         LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "booking_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "client_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "target_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d9b4fcef393b9b06a884e3e339fac878751a0088c1b830f80e5bc76cd7fb281e"
+}

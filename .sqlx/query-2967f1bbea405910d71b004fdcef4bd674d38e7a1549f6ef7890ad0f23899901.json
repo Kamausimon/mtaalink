@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE payout_requests\n           SET status = 'approved', notes = $1, updated_at = NOW()\n           WHERE id = $2 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2967f1bbea405910d71b004fdcef4bd674d38e7a1549f6ef7890ad0f23899901"
+}

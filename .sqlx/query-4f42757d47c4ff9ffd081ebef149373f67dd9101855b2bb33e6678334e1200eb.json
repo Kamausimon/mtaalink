@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT b.client_id,\n                  COALESCE(p.user_id, biz.user_id) AS service_owner_user_id\n           FROM bookings b\n           LEFT JOIN providers   p   ON b.target_type = 'provider'  AND b.target_id = p.id\n           LEFT JOIN businesses  biz ON b.target_type = 'business' AND b.target_id = biz.id\n           WHERE b.id = $1 AND b.status = 'disputed'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "service_owner_user_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "4f42757d47c4ff9ffd081ebef149373f67dd9101855b2bb33e6678334e1200eb"
+}

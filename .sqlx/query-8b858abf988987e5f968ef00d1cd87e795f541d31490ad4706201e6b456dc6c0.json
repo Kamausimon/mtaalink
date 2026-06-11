@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE bookings SET scheduled_time = $1 WHERE id = $2 AND client_id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamp",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8b858abf988987e5f968ef00d1cd87e795f541d31490ad4706201e6b456dc6c0"
+}

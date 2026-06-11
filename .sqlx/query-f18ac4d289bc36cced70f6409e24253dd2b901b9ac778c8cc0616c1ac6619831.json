@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO review_replies (review_id, reviewer_id, comment)\n         VALUES ($1, $2, $3)\n         RETURNING id, review_id, reviewer_id, comment, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "review_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "reviewer_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f18ac4d289bc36cced70f6409e24253dd2b901b9ac778c8cc0616c1ac6619831"
+}

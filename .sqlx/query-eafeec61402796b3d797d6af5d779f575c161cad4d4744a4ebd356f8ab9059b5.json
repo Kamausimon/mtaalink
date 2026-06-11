@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT start_time, end_time, is_available\n         FROM provider_availability\n         WHERE provider_id = $1 AND day = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "start_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 1,
+        "name": "end_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_available",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "eafeec61402796b3d797d6af5d779f575c161cad4d4744a4ebd356f8ab9059b5"
+}
