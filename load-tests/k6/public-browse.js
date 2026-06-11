@@ -43,11 +43,11 @@ const LOCATIONS = ['Westlands, Nairobi', 'Kasarani, Nairobi', 'CBD, Nairobi', ''
 // so detail-page requests hit real records instead of 404s.
 export function setup() {
   const providers = http.get(`${BASE_URL}/service_providers/listProviders`).json('providers') || [];
-  const businesses = http.get(`${BASE_URL}/businesses/listBusinesses`).json('businesses') || [];
+  const businesses = http.get(`${BASE_URL}/categories/businesses/by-category`).json('businesses') || [];
 
   return {
     providerIds: providers.slice(0, 20).map((p) => p.id),
-    businessIds: businesses.slice(0, 20).map((b) => b.id),
+    businessIds: [...new Set(businesses.map((b) => b.business_id))].slice(0, 20),
   };
 }
 
@@ -64,10 +64,10 @@ export default function (data) {
   group('search', () => {
     const q = randomItem(SEARCH_TERMS);
     const location = randomItem(LOCATIONS);
-    const params = new URLSearchParams({ q, page: '1', per_page: '12' });
-    if (location) params.set('location', location);
+    let qs = `q=${encodeURIComponent(q)}&page=1&per_page=12`;
+    if (location) qs += `&location=${encodeURIComponent(location)}`;
 
-    const res = http.get(`${BASE_URL}/search?${params.toString()}`);
+    const res = http.get(`${BASE_URL}/search?${qs}`);
     searchDuration.add(res.timings.duration);
     check(res, { 'search: status 200': (r) => r.status === 200 });
   });
@@ -76,7 +76,7 @@ export default function (data) {
     const provRes = http.get(`${BASE_URL}/service_providers/listProviders`);
     check(provRes, { 'list providers: status 200': (r) => r.status === 200 });
 
-    const bizRes = http.get(`${BASE_URL}/businesses/listBusinesses`);
+    const bizRes = http.get(`${BASE_URL}/categories/businesses/by-category`);
     check(bizRes, { 'list businesses: status 200': (r) => r.status === 200 });
   });
 

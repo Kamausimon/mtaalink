@@ -10,12 +10,11 @@ use axum::{
     Json, Router,
     extract::{Query, State},
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
 };
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use std::{env, sync::Arc};
+use std::{env, sync::Arc, time::Duration as StdDuration};
 use serde_json::json;
 use sqlx::PgPool;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
@@ -23,7 +22,8 @@ use uuid::Uuid;
 use validator::Validate;
 
 pub fn auth_routes(pool: PgPool) -> Router {
-    let governor_conf = Arc::new(
+    // Strict limit for brute-force-sensitive endpoints (login, registration, password reset).
+    let sensitive_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(3)
             .burst_size(10)
@@ -31,15 +31,31 @@ pub fn auth_routes(pool: PgPool) -> Router {
             .unwrap(),
     );
 
-    Router::new()
+    // Higher limit for cheap, frequently-polled read endpoints (e.g. session checks):
+    // burst of 50, refilling at 20 requests/second.
+    let read_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .period(StdDuration::from_millis(50))
+            .burst_size(50)
+            .finish()
+            .unwrap(),
+    );
+
+    let sensitive_routes = Router::new()
         .route("/register", post(register))
         .route("/login", post(login_handler))
         .route("/forgot-password", post(forgot_password))
-        .route("/me", get(me))
         .route("/reset-password", post(reset_password))
-        .route("/verify-email", get(verify_email))
         .route("/resend-verification", post(resend_verification))
-        .layer(GovernorLayer { config: governor_conf })
+        .layer(GovernorLayer { config: sensitive_governor_conf });
+
+    let read_routes = Router::new()
+        .route("/me", get(me))
+        .route("/verify-email", get(verify_email))
+        .layer(GovernorLayer { config: read_governor_conf });
+
+    sensitive_routes
+        .merge(read_routes)
         .with_state(pool)
 }
 
