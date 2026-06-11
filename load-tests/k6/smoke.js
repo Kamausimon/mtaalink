@@ -23,7 +23,7 @@ export default function () {
   const endpoints = [
     ['/categories/allCategories', 'categories'],
     ['/service_providers/listProviders', 'providers list'],
-    ['/businesses/listBusinesses', 'businesses list'],
+    ['/categories/businesses/by-category', 'businesses list'],
     ['/search?q=plumb', 'search'],
   ];
 
