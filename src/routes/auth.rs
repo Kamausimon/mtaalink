@@ -212,10 +212,15 @@ pub async fn register(
         .execute(&pool_clone)
         .await;
 
-        if let Ok(cfg) = EmailConfig::from_env() {
-            let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-            let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
-            let _ = send_email(&cfg, &email_clone, "Verify your MtaaLink email", &email_verification_html(&verify_url)).await;
+        match EmailConfig::from_env() {
+            Ok(cfg) => {
+                let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+                let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+                if let Err(e) = send_email(&cfg, &email_clone, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
+                    tracing::error!("Failed to send verification email to {}: {}", email_clone, e);
+                }
+            }
+            Err(e) => tracing::error!("Email config error: {}", e),
         }
     });
 
@@ -523,10 +528,15 @@ pub async fn resend_verification(
         .execute(&pool_clone)
         .await;
 
-        if let Ok(cfg) = EmailConfig::from_env() {
-            let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-            let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
-            let _ = send_email(&cfg, &email, "Verify your MtaaLink email", &email_verification_html(&verify_url)).await;
+        match EmailConfig::from_env() {
+            Ok(cfg) => {
+                let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+                let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+                if let Err(e) = send_email(&cfg, &email, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
+                    tracing::error!("Failed to send verification email to {}: {}", email, e);
+                }
+            }
+            Err(e) => tracing::error!("Email config error: {}", e),
         }
     });
 
