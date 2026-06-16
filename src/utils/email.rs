@@ -7,31 +7,32 @@ pub async fn send_email(
     subject: &str,
     html_body: &str,
 ) -> AppResult<()> {
-    let api_key = env::var("RESEND_API_KEY")
-        .map_err(|_| AppError::Internal("RESEND_API_KEY not set".to_string()))?;
+    let api_key = env::var("BREVO_API_KEY")
+        .map_err(|_| AppError::Internal("BREVO_API_KEY not set".to_string()))?;
     let from = env::var("FROM_EMAIL")
-        .unwrap_or_else(|_| "onboarding@resend.dev".to_string());
+        .unwrap_or_else(|_| "kamausimon217@gmail.com".to_string());
     let from_name = env::var("FROM_NAME")
         .unwrap_or_else(|_| "Sokavi".to_string());
 
     let client = reqwest::Client::new();
     let res = client
-        .post("https://api.resend.com/emails")
-        .bearer_auth(&api_key)
+        .post("https://api.brevo.com/v3/smtp/email")
+        .header("api-key", &api_key)
+        .header("content-type", "application/json")
         .json(&json!({
-            "from": format!("{} <{}>", from_name, from),
-            "to": [to_address],
+            "sender": { "name": from_name, "email": from },
+            "to": [{ "email": to_address }],
             "subject": subject,
-            "html": html_body,
+            "htmlContent": html_body,
         }))
         .send()
         .await
-        .map_err(|e| AppError::Internal(format!("Resend request failed: {}", e)))?;
+        .map_err(|e| AppError::Internal(format!("Brevo request failed: {}", e)))?;
 
     if !res.status().is_success() {
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
-        return Err(AppError::Internal(format!("Resend error {}: {}", status, body)));
+        return Err(AppError::Internal(format!("Brevo error {}: {}", status, body)));
     }
 
     Ok(())
