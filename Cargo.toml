@@ -33,3 +33,4 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 futures-util = "0.3"
+sentry = { version = "0.34", features = ["tracing", "tower", "tower-http"] }

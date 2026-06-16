@@ -10,6 +10,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use sentry::integrations::tower as sentry_tower;
 
 mod errors;
 mod extractors;
@@ -46,7 +47,17 @@ use utils::ws_state::{WsConnections, new_ws_connections};
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+
+    let _sentry = env::var("SENTRY_DSN").ok().map(|dsn| {
+        sentry::init((dsn, sentry::ClientOptions {
+            release: sentry::release_name!(),
+            traces_sample_rate: 0.2,
+            ..Default::default()
+        }))
+    });
+
     tracing_subscriber::registry()
+        .with(sentry::integrations::tracing::layer())
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -130,6 +141,8 @@ async fn main() {
         .layer(Extension(storage))
         .layer(cors_layer)
         .layer(TraceLayer::new_for_http())
+        .layer(sentry_tower::NewSentryLayer::new_from_top())
+        .layer(sentry_tower::SentryHttpLayer::with_transaction())
         .route("/", get(root));
 
     let port = env::var("PORT").unwrap_or_else(|_| "7878".to_string());
