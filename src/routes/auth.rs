@@ -1,6 +1,6 @@
 use crate::errors::{AppError, AppResult};
 use crate::extractors::current_user::CurrentUser;
-use crate::utils::email::{EmailConfig, email_verification_html, password_reset_html, send_email};
+use crate::utils::email::{email_verification_html, password_reset_html, send_email};
 use crate::utils::jwt::create_jwt;
 use argon2::{
     Argon2, PasswordVerifier,
@@ -212,15 +212,10 @@ pub async fn register(
         .execute(&pool_clone)
         .await;
 
-        match EmailConfig::from_env() {
-            Ok(cfg) => {
-                let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-                let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
-                if let Err(e) = send_email(&cfg, &email_clone, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
-                    tracing::error!("Failed to send verification email to {}: {}", email_clone, e);
-                }
-            }
-            Err(e) => tracing::error!("Email config error: {}", e),
+        let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+        if let Err(e) = send_email(&email_clone, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
+            tracing::error!("Failed to send verification email to {}: {}", email_clone, e);
         }
     });
 
@@ -422,12 +417,8 @@ pub async fn forgot_password(
     let reset_url = format!("{}/reset-password?token={}", frontend_url, token);
     let html = password_reset_html(&reset_url, 15);
 
-    if let Ok(config) = EmailConfig::from_env() {
-        if let Err(e) = send_email(&config, &payload.email, "Reset your MtaaLink password", &html).await {
-            tracing::error!("Failed to send password reset email: {}", e);
-        }
-    } else {
-        tracing::warn!("Email not configured — skipping password reset email");
+    if let Err(e) = send_email(&payload.email, "Reset your Sokavi password", &html).await {
+        tracing::error!("Failed to send password reset email: {}", e);
     }
 
     Ok((
@@ -528,15 +519,10 @@ pub async fn resend_verification(
         .execute(&pool_clone)
         .await;
 
-        match EmailConfig::from_env() {
-            Ok(cfg) => {
-                let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-                let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
-                if let Err(e) = send_email(&cfg, &email, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
-                    tracing::error!("Failed to send verification email to {}: {}", email, e);
-                }
-            }
-            Err(e) => tracing::error!("Email config error: {}", e),
+        let frontend_url = env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let verify_url = format!("{}/verify-email?token={}", frontend_url, token_clone);
+        if let Err(e) = send_email(&email, "Verify your Sokavi email", &email_verification_html(&verify_url)).await {
+            tracing::error!("Failed to send verification email to {}: {}", email, e);
         }
     });
 

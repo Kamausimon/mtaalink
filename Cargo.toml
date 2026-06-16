@@ -25,7 +25,6 @@ tower-http = { version = "0.5", features = ["cors", "trace","full"] }
 tower = "0.4"
 tokio-util = "0.7"
 bigdecimal = { version = "0.3.1", features = ["serde"] }
-lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls", "smtp-transport", "builder"] }
 bytes = "1"
 tower_governor = { version = "0.4", features = ["axum"] }
 base64 = "0.22"

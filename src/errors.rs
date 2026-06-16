@@ -89,14 +89,3 @@ impl From<validator::ValidationErrors> for AppError {
     }
 }
 
-impl From<lettre::error::Error> for AppError {
-    fn from(e: lettre::error::Error) -> Self {
-        AppError::EmailError(e.to_string())
-    }
-}
-
-impl From<lettre::address::AddressError> for AppError {
-    fn from(e: lettre::address::AddressError) -> Self {
-        AppError::EmailError(e.to_string())
-    }
-}
