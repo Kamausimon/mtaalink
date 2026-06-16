@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.email, u.username, b.service_description, b.scheduled_time,\n                          COALESCE(p.service_name, biz.business_name, 'Provider') AS provider_name\n                   FROM bookings b\n                   JOIN users u ON u.id = b.client_id\n                   LEFT JOIN providers p ON b.target_type = 'provider' AND b.target_id = p.id\n                   LEFT JOIN businesses biz ON b.target_type = 'business' AND b.target_id = biz.id\n                   WHERE b.id = $1",
+  "query": "SELECT u.email, u.username, b.service_description, b.scheduled_time,\n                      COALESCE(p.service_name, biz.business_name, 'Provider') AS provider_name\n               FROM bookings b\n               JOIN users u ON u.id = b.client_id\n               LEFT JOIN providers p ON b.target_type = 'provider' AND b.target_id = p.id\n               LEFT JOIN businesses biz ON b.target_type = 'business' AND b.target_id = biz.id\n               WHERE b.id = $1",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       null
     ]
   },
-  "hash": "293a23c97f9076bbde4822933a68f47685b8ece369d8188ff9a9afa339abdcae"
+  "hash": "c3ed9e4f34211c863c130d45e94510370ed3f9295913842bff3d6ab48ae39e0c"
 }
