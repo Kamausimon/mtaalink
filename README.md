@@ -1,8 +1,9 @@
-# MtaaLink API
+# Sokavi API
 
-Hyperlocal Kenyan service marketplace backend. Connects clients with service providers and businesses — bookings, M-Pesa payments, real-time messaging, reviews, analytics, and more.
+Hyperlocal Kenyan service marketplace. Connects clients with service providers and businesses — bookings, M-Pesa payments, real-time messaging, reviews, analytics, and more.
 
-Built with **Rust / Axum 0.7 / SQLx 0.7 / PostgreSQL**.
+**Backend:** Rust / Axum 0.7 / SQLx 0.7 / PostgreSQL — deployed on Railway.
+**Frontend:** Next.js 15 / Tailwind CSS — deployed on Vercel.
 
 ---
 
@@ -48,7 +49,7 @@ cp .env.example .env
 # 2. Run the server — migrations apply automatically on startup
 cargo run
 
-# Server starts on http://127.0.0.1:7878
+# Server starts on http://0.0.0.0:7878
 ```
 
 ---
@@ -61,19 +62,20 @@ cargo run
 | `JWT_SECRET` | Yes | Secret key for signing JWTs |
 | `FRONTEND_URL` | No | CORS allowed origin (default: `http://localhost:3000`) |
 | `PORT` | No | Server port (default: `7878`) |
-| `SMTP_HOST` | No | SMTP server for email |
-| `SMTP_PORT` | No | SMTP port (default: 587) |
-| `SMTP_USER` | No | SMTP username |
-| `SMTP_PASS` | No | SMTP password |
-| `SMTP_FROM` | No | From address for outgoing emails |
+| `BREVO_API_KEY` | No | Brevo API key for transactional email |
+| `FROM_EMAIL` | No | Sender email address |
+| `FROM_NAME` | No | Sender display name (default: `Sokavi`) |
 | `AT_API_KEY` | No | Africa's Talking API key (SMS) |
 | `AT_USERNAME` | No | Africa's Talking username |
 | `AT_SENDER_ID` | No | SMS sender ID |
+| `MPESA_ENV` | No | `sandbox` or `production` |
 | `MPESA_CONSUMER_KEY` | No | M-Pesa consumer key |
 | `MPESA_CONSUMER_SECRET` | No | M-Pesa consumer secret |
 | `MPESA_SHORTCODE` | No | M-Pesa business shortcode |
 | `MPESA_PASSKEY` | No | M-Pesa passkey |
 | `MPESA_CALLBACK_URL` | No | Public HTTPS URL for M-Pesa callback |
+| `SENTRY_DSN` | No | Sentry DSN for error monitoring |
+| `STORAGE_BACKEND` | No | `local` (dev) or `s3` (production) |
 | `AWS_ACCESS_KEY_ID` | No | S3 file storage key |
 | `AWS_SECRET_ACCESS_KEY` | No | S3 file storage secret |
 | `AWS_REGION` | No | S3 region |
